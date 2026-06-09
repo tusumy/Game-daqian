@@ -58,7 +58,7 @@ def run():
             page.goto(game_url, wait_until="networkidle", timeout=60000)
             time.sleep(10)
 
-            # === 【特殊判定 1】：如果迷路掉进了“宝游戏中心”主页 ===
+            # === 【特殊判定 1】：如果迷路掉进了“支付宝游戏中心”主页 ===
             if "游戏中心" in page.title() or page.locator("text='寻道大千'").is_visible(timeout=3000):
                 print("[!] 误入游戏中心，正在强行修正...")
                 try:
