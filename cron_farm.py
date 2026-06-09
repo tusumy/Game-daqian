@@ -7,7 +7,6 @@ def find_and_click_image(page, template_path, confidence=0.8):
     """
     用OpenCV在当前游戏画面中寻找指定的切图，找到了就点它中心点
     """
-    # 这里保持你原有的视觉雷达函数逻辑不动
     try:
         screenshot_bytes = page.screenshot()
         nparr = np.frombuffer(screenshot_bytes, np.uint8)
@@ -30,21 +29,43 @@ def find_and_click_image(page, template_path, confidence=0.8):
         print(f"[-] 视觉雷达扫描异常: {e}")
     return False
 
+def find_seed_by_relative_flipping(page, b_click_x, b_click_y):
+    """
+    【尊上终极自创】：乾坤挪移相对翻页术。
+    根据当前土坑的动态坐标 (b_click_x, b_click_y)，推算并点击相对的翻页按钮。
+    """
+    for page_num in range(3):  # 最多翻3页，防止种子耗尽导致卡死
+        print(f"        [动态雷达] 正在扫描地块周边的种子菜单第 {page_num + 1} 页...")
+        
+        # 视觉雷达尝试在当前界面寻找青石斛种子
+        if find_and_click_image(page, "qingshihu_seed.png", confidence=0.8):
+            return True
+            
+        # ⚠️ 核心微调区：若第一页没有，根据当前土坑，实时推算翻页箭头的绝对坐标！
+        # 本尊这里假设翻页按钮在当前地块的【右方120像素，下方40像素】处。
+        # 明日你若发现戳不准翻页，只需修改下面这两行偏移量（+120 和 +40）即可！
+        flip_x = b_click_x + 120
+        flip_y = b_click_y + 40
+        
+        print(f"        [-] 当前页未见种子，启动相对翻页：戳动态坐标 ({flip_x}, {flip_y})")
+        page.mouse.click(flip_x, flip_y) 
+        time.sleep(1.5)  # 等待翻页动画
+        
+    return False
+
 def run():
     with sync_playwright() as p:
-        # 这里对应你原先启动浏览器、登录、进入丹界的逻辑
-        # 假设你原本的变量名是 browser 和 page
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
         # ------------------ 你的前置登录与着陆逻辑 ------------------
-        # （此处系统会自动执行你原先写在前面的特定游戏URL跳转与登录）
+        # （系统会自动执行你原先写在前面的特定游戏URL跳转）
         # ----------------------------------------------------------
 
         try:
             print("--- 成功着陆丹界！雷达开启像素级扫描 ---")
 
-            # ==================== 尊上无上绝学：36坑视觉收种合一大阵 ====================
+            # ==================== 尊上无上绝学：36坑视觉收种相对合一大阵 ====================
             blocks = [
                 {"start": (155, 530), "name": "左下药田"},
                 {"start": (205, 490), "name": "左上药田"},
@@ -53,7 +74,7 @@ def run():
             ]
             dx, dy = 16, 11
 
-            print("\n[+] 诸天至尊：36坑视觉收种合一无上大阵，起！！！")
+            print("\n[+] 诸天至尊：36坑视觉动态收种大阵，轰然起航！！！")
 
             for b in blocks:
                 print(f"[*] 雷达正在死守并锁死：{b['name']}")
@@ -64,29 +85,29 @@ def run():
                         click_x = start_x + (col * dx) - (row * dx)
                         click_y = start_y + (row * dy) + (col * dy)
 
-                        print(f"\n    [★] 正在全神贯注对准第 {row*3 + col + 1} 块小土坑 (坐标: {click_x}, {click_y})")
+                        print(f"\n    [★] 正在精准对准第 {row*3 + col + 1} 块动态土坑 (坐标: {click_x}, {click_y})")
 
                         # 第一步：先对这个小土坑狠狠砸下一拳
                         page.mouse.click(click_x, click_y)
                         time.sleep(2.5)
 
-                        # 第二步：情况A - 如果熟了，调用视觉雷达抓取“收获”小手
+                        # 第二步：情况A - 如果熟了，收割极品青石斛
                         if find_and_click_image(page, "shouhuo_btn.png", confidence=0.8):
                             print("        [+] 拔草成功！收割一株极品青石斛！")
                             time.sleep(3.0)
 
-                            # 地空了，原地再补一拳，调出种子菜单
+                            # 地空了，原地再补一拳，重新调出动态种子菜单
                             page.mouse.click(click_x, click_y)
                             time.sleep(2.5)
 
-                        # 第三步：情况B - 无论原本就是空地，还是刚收割完的空地，开始种菜
-                        if find_and_click_image(page, "qingshihu_seed.png", confidence=0.8):
+                        # 第三步：情况B - 将当前坑位的绝对坐标传进去，进行【动态相对翻页寻种】
+                        if find_seed_by_relative_flipping(page, click_x, click_y):
                             print("        [+] 播种成功！全新青石斛已入土安家！")
                             time.sleep(2.0)
                         else:
-                            print("        [-] 警告：未能找到种子，可能此坑已经种过了，或者种子耗尽！")
+                            print("        [-] 警告：动态翻遍3页未能找到种子，可能种子彻底耗尽！")
 
-                        # 安全机制：点一下最上方空白处关闭可能残存的弹窗
+                        # 安全机制：点一下最上方绝对空白处清场弹窗，并重置下一次菜单
                         page.mouse.click(225, 50)
                         time.sleep(1.5)
 
