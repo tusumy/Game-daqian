@@ -93,32 +93,55 @@ def run():
             # === 动作 3：无情锄地与【青石斛】精细化种植 ===
             print("--- 成功着陆丹界！雷达开启像素级扫描 ---")
             
-            # 药田 6 块地的黄金相对中心坐标
-            grid_coords = [
-                (225, 480), (170, 520), (280, 520), 
-                (225, 560), (170, 600), (280, 600)
-            ]
-            
-            for idx, (x, y) in enumerate(grid_coords):
-                print(f"\n[*] 雷达对准第 {idx+1} 块菜地 ({x}, {y})")
-                page.mouse.click(x, y) 
-                time.sleep(2.5) # 给地块弹窗预留充足时间
+      # ==================== 尊上无上绝学：36坑视觉收种合一完全体大阵 ====================
+    # 1. 测算四大区块的左上角起点坐标与斜 45 度视角步长
+    blocks = [
+        {"start": (155, 530), "name": "左下药田"},
+        {"start": (205, 490), "name": "左上药田"},
+        {"start": (260, 480), "name": "右上药田"},
+        {"start": (265, 520), "name": "右下药田"}
+    ]
+    dx, dy = 16, 11  # 像素级黄金步长
+    
+    print("\n[+] 诸天至尊：36坑视觉收种合一无上大阵，起！！！")
+    
+    # 2. 四大药田核心大循环
+    for b in blocks:
+        print(f"[*] 雷达正在死守并锁死：{b['name']}")
+        start_x, start_y = b["start"]
+        
+        # 3. 3x3 矩阵式斜向透视，一个坑位一个坑位地进行深度压榨
+        for row in range(3):
+            for col in range(3):
+                # 完美的 3D 斜角坐标转换，精确定位当前这一个小土坑
+                click_x = start_x + (col * dx) - (row * dx)
+                click_y = start_y + (row * dy) + (col * dy)
                 
-                # 情况 A：如果熟了，抓取“收获”小手
+                print(f"\n    [★] 正在全神贯注对准第 {row*3 + col + 1} 块小土坑 (坐标: {click_x}, {click_y})")
+                
+                # 第一步：先对这个小土坑狠狠砸下一拳
+                page.mouse.click(click_x, click_y)
+                time.sleep(2.5)  # 给地块弹窗预留充足的灵力反应时间
+                
+                # 第二步：情况A - 如果熟了，调用视觉雷达抓取“收获”小手
                 if find_and_click_image(page, "shouhuo_btn.png", confidence=0.8):
-                    print("[+] 拔草成功！")
-                    time.sleep(3) # 等收割动画彻底播完
+                    print("        [+] 拔草成功！收割一株极品青石斛！")
+                    time.sleep(3.0)  # 等收割动画彻底播完，免得卡住法轨
                     
-                    # 地空了，原地再补一拳调出种子菜单
-                    page.mouse.click(x, y)
+                    # 地空了，原地再补一拳，调出种子菜单
+                    page.mouse.click(click_x, click_y)
                     time.sleep(2.5)
                 
-                # 情况 B：如果是空地，寻找【青石斛】并种下
-                if find_and_click_image(page, "seed_btn.png", confidence=0.8):
-                    print("[+] 成功种下【青石斛】！")
-                    time.sleep(2.5) 
+                # 第三步：情况B - 无论原本就是空地，还是刚刚收割完的空地，现在统一开始种菜
+                # 调用视觉雷达，寻找并点击你的“青石斛种子”图标
+                if find_and_click_image(page, "qingshihu_seed.png", confidence=0.8):
+                    print("        [+] 播种成功！全新青石斛已入土安家！")
+                    time.sleep(2.0)  # 等待种植动画完成
                 else:
-                    print("[-] 未发现可种状态（可能菜未熟、或种子耗尽）。")
+                    print("        [-] 警告：未能找到种子，可能此坑已经种过了，或者种子耗尽！")
+                    
+    print("\n[+] 功德圆满！36块灵田已全部深度扫描并完成收种，无一遗漏！")
+    # ===================================================================================
                     # 安全机制：点一下最上方空白处关闭可能残存的弹窗，防止卡死下一个格子
                     page.mouse.click(225, 50)
                     time.sleep(1.5)
