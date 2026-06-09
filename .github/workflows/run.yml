@@ -4,11 +4,15 @@ on:
   schedule:
     # 国际标准时间。'0 */2 * * *' 代表每 2 小时自动跑一次
     - cron: '0 */2 * * *'
-  workflow_dispatch: # 允许你手动在网页上点按钮测试
+  workflow_dispatch: # 允许手动在网页上点按钮测试
 
 jobs:
   farm:
     runs-on: ubuntu-latest
+    # 核心排雷：强制让系统适配最新的 Node 24 运行环境
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      
     steps:
     - name: 检查代码
       uses: actions/checkout@v4
@@ -25,6 +29,5 @@ jobs:
 
     - name: 执行修仙种菜
       env:
-        # 从你的 GitHub Secrets 里安全读取游戏长链接
         GAME_URL: ${{ secrets.GAME_URL }}
       run: python cron_farm.py
