@@ -5,7 +5,8 @@ import os
 import json
 from playwright.sync_api import sync_playwright
 
-def find_and_click_image(page, template_path, confidence=0.8):
+def find_and_click_image(page, template_path, confidence=0.75):
+    """【无上雷达】：锁定图腾中心并狠狠戳下去"""
     try:
         screenshot_bytes = page.screenshot()
         nparr = np.frombuffer(screenshot_bytes, np.uint8)
@@ -18,70 +19,67 @@ def find_and_click_image(page, template_path, confidence=0.8):
             h, w, _ = template.shape
             page.mouse.click(max_loc[0] + w // 2, max_loc[1] + h // 2)
             return True
-    except Exception as e:
-        print(f"[-] 雷达失灵: {e}")
+    except:
+        pass
+    return False
+
+def auto_wait_and_click(page, img_name, timeout=15, desc=""):
+    """【死等法轨】：苦苦等待路标出现并破开它"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if find_and_click_image(page, img_name):
+            time.sleep(2.0)
+            return True
+        time.sleep(1.0)
     return False
 
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         
-        # 【尊上太极护体防炸盾】：彻底解决第 34 行的 JSONDecodeError 暴毙劫！
+        # 尊上太极护体盾：防坏令牌炸仓
         context = None
         if os.path.exists("auth.json"):
             try:
-                # 尝试用纯净法力探测一下令牌格式
-                with open("auth.json", "r", encoding="utf-8") as f:
-                    json.load(f)
-                
-                print("[+] 奇迹！你的 auth.json 格式竟然是合法的，正在注入神识...")
-                context = browser.new_context(
-                    viewport={"width": 800, "height": 900},
-                    storage_state="auth.json"
-                )
-            except Exception as e:
-                # 核心防炸点：如果这里抛出 JSONDecodeError，直接在这个小结界里化解！
-                print(f"[!] 抓到叛徒！你的 auth.json 藏有非法字符 ({e})！尊上已将其物理超度，启动裸奔模式，绝不让长工爆仓！")
+                with open("auth.json", "r", encoding="utf-8") as f: json.load(f)
+                context = browser.new_context(viewport={"width": 800, "height": 900}, storage_state="auth.json")
+                print("[+] 带着30天登录神识令牌，破空出发！")
+            except:
                 context = browser.new_context(viewport={"width": 800, "height": 900})
         else:
-            print("[-] 乾坤袋里未见 auth.json，长工将赤脚前往...")
             context = browser.new_context(viewport={"width": 800, "height": 900})
             
         page = context.new_page()
-        print("[+] 正在破空开辟修仙通道...")
         page.goto("https://www.wanyiwan.top/game/xddq")
-        
-        print("[*] 正在给整个大阵充能（等候 15 秒）...")
-        time.sleep(15)
+        time.sleep(15) # 等待天地重绘
 
         try:
-            # ==================== 步法一：物理右滑 ====================
-            print("\n[★] 步骤一：按住右侧，狠狠向左拖拽 500 像素...")
+            # === 第一步：超度公告弹窗 ===
+            page.mouse.click(100, 700) # 先盲砸一拳清障
+            find_and_click_image(page, "close_notice.png")
+            time.sleep(2.0)
+
+            # === 第二步：大撕裂右滑 ===
             page.mouse.move(700, 300)
             page.mouse.down()
             page.mouse.move(200, 300, steps=25)
             page.mouse.up()
             time.sleep(3.0)
 
-            # 强拍一张右滑后的现场，发到产物里
-            page.screenshot(path="after_slide_scene.png")
-            print("    [+] 已拍下划拉后的画面：after_slide_scene.png")
-
-            # ==================== 步法二：锁定全屏 ====================
-            print("[★] 步骤二：雷达开始锁定【全屏】图腾...")
-            if find_and_click_image(page, "fullscreen_btn.png", confidence=0.75):
-                print("    [+] 成功戳中【全屏】按钮！")
-                time.sleep(6.0)
-            else:
-                print("    [-] 雷达未找到全屏，启动终极盲戳相对坐标 (320, 290)！")
+            # === 第三步：戳中全屏按钮 ===
+            if not find_and_click_image(page, "fullscreen_btn.png"):
                 page.mouse.click(320, 290)
-                time.sleep(6.0)
+            time.sleep(6.0)
 
-            # 拍一张全屏后的证物
-            page.screenshot(path="after_fullscreen_scene.png")
-            print("    [+] 已拍下全屏后的画面：after_fullscreen_scene.png")
+            # === 第四步：视觉无缝自导引，一路杀进丹界 ===
+            auto_wait_and_click(page, "enter_game_btn.png", timeout=10, desc="踏入仙途")
+            auto_wait_and_click(page, "dongfu_btn.png", timeout=12, desc="洞府图标")
+            auto_wait_and_click(page, "danjie_btn.png", timeout=12, desc="丹界药田")
+            print("[+] 成功！长工已空降全屏状态下的纯净药田核心！")
+            time.sleep(5.0)
 
-            # ==================== 步法三：36坑视觉收种 ====================
+            # === 第五步：三十六天罡【搜索流】精准收种大阵 ===
+            # 四个大土块的中心起点坐标
             blocks = [
                 {"start": (155, 530), "name": "左下药田"},
                 {"start": (205, 490), "name": "左上药田"},
@@ -90,40 +88,60 @@ def run():
             ]
             dx, dy = 16, 11
 
-            print("\n[+] 诸天至尊：三十六天罡视觉收种大阵，起！！！")
+            print("\n[★] 诸天至尊：升级版【神识搜索流】药田拔草播种大阵，起！！！")
             for b in blocks:
-                print(f"[*] 当前死守药田：{b['name']}")
+                print(f"[*] 当前死守：{b['name']}")
                 start_x, start_y = b["start"]
                 for row in range(3):
                     for col in range(3):
                         click_x = start_x + (col * dx) - (row * dx)
                         click_y = start_y + (row * dy) + (col * dy)
 
+                        # 1. 狠狠戳向地块
                         page.mouse.click(click_x, click_y)
                         time.sleep(2.0)
 
+                        # 2. 如果露出了收获图标，立刻拔草
                         if find_and_click_image(page, "shouhuo_btn.png", confidence=0.8):
-                            print("        [+] 拔草成功！")
+                            print("        [+] 拔草成功！收割一株青石斛！")
                             time.sleep(2.5)
-                            page.mouse.click(click_x, click_y)
+                            page.mouse.click(click_x, click_y) # 再次戳开这块空地
                             time.sleep(2.0)
 
+                        # 3. 🔥【核心神技】：利用搜索框直接定向抓取青石斛！
+                        # 先用雷达锁定你截图里的“搜索灵植”小框
+                        if find_and_click_image(page, "search_bar.png", confidence=0.75):
+                            print("        [+] 锁定了搜索灵植框，正在注入法力...")
+                            time.sleep(1.0)
+                            # 往搜索框里直接键盘输入“青石斛”三个字！
+                            page.keyboard.type("青石斛")
+                            time.sleep(1.5)
+                        else:
+                            # 盲戳：如果没找到 search_bar 按钮，就盲戳灵植列表左上角的搜索框大概相对位置
+                            page.mouse.click(click_x + 60, click_y - 120) 
+                            time.sleep(1.0)
+                            page.keyboard.type("青石斛")
+                            time.sleep(1.5)
+
+                        # 4. 搜索完后，青石斛会自动变成第一个！直接雷达戳它！
                         if find_and_click_image(page, "qingshihu_seed.png", confidence=0.8):
-                            print("        [+] 播种成功！")
+                            print("        [+] 搜索流定向播种成功！")
                             time.sleep(2.0)
                         else:
-                            page.mouse.click(click_x + 120, click_y + 40)
-                            time.sleep(1.5)
-                            find_and_click_image(page, "qingshihu_seed.png", confidence=0.8)
+                            # 兜底盲戳第一个种子的位置
+                            print("        [-] 搜索未完全匹配，盲戳灵植第一个格子...")
+                            page.mouse.click(click_x, click_y - 60)
+                            time.sleep(2.0)
 
+                        # 5. 戳一下旁边毫无关联的空白天空（比如 200, 30），清空弹窗，防止挡住下一块地
                         page.mouse.click(200, 30)
-                        time.sleep(1.0)
+                        time.sleep(1.2)
 
-            print("\n[+] --- 药田打理大阵运转完毕 ---")
+            print("\n[+] --- 诸天药田【搜索流】收种全部圆满功成！！！ ---")
 
         except Exception as e:
-            print(f"!!! 运行中遇到法则排斥: {e}")
-            page.screenshot(path="final_error_scene.png")
+            print(f"!!! 阵法中途遇到法則排斥: {e}")
+            page.screenshot(path="lost_way_scene.png")
         finally:
             browser.close()
 
