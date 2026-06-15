@@ -1,3 +1,4 @@
+import traceback
 import cv2
 import numpy as np
 import time
@@ -176,3 +177,8 @@ def run():
 
 if __name__ == "__main__":
     run()
+except Exception as e:
+    print("!!! 脚本崩了，具体位置如下：")
+    traceback.print_exc()
+    page.screenshot(path="crash_debug.png")
+    raise
