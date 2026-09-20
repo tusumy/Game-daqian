@@ -35,7 +35,6 @@ def qr_locator(page):
         ".qrCodeContainer-yvXXNfUj canvas",
         "[class*='qrCodeContainer'] canvas",
         "canvas[ke]",
-        "canvas",
     ]
     for selector in selectors:
         try:
@@ -237,9 +236,21 @@ def run():
                     print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
 
                     deadline = time.time() + SCAN_TIMEOUT
+                    left_qr_since = None
                     while time.time() < deadline:
                         if real_game_ready(page):
                             break
+
+                        current_qr = qr_locator(page)
+                        if current_qr is None and "/login/xddq" not in page.url:
+                            if left_qr_since is None:
+                                left_qr_since = time.time()
+                            elif time.time() - left_qr_since >= 5:
+                                print("[+] 二维码已消失并离开登录页，按扫码成功继续")
+                                break
+                        else:
+                            left_qr_since = None
+
                         time.sleep(1)
                     else:
                         raise RuntimeError("等待支付宝扫码超时")
