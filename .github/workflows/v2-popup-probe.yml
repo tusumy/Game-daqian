@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'v2/probe_popup.py'
+      - 'v2/templates/**'
       - '.github/workflows/v2-popup-probe.yml'
   workflow_dispatch:
 
@@ -22,7 +23,7 @@ jobs:
         with:
           python-version: '3.10'
       - run: |
-          pip install playwright
+          pip install playwright opencv-python-headless
           playwright install --with-deps chromium
       - name: Restore #20 login
         env:
@@ -34,6 +35,7 @@ jobs:
           test -f /tmp/xddq20/qr/storage_state.json
       - run: python v2/probe_popup.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: xddq-popup-probe-${{ github.run_number }}
           path: v2/popup-probe/
