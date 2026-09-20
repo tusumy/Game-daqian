@@ -70,10 +70,15 @@ with sync_playwright() as p:
     time.sleep(8)
 
     launched=recorder.enter_xddq_from_portal(page)
-    if not launched:
+    if launched:
+        page=launched
+    elif "/game/xddq" in page.url:
+        # 入口已经切到寻道页面，只是游戏 iframe / WebSocket 还没来得及建立。
+        # 这里继续等待，不能过早判失败。
+        print("[+] 已进入 /game/xddq，继续等待游戏本体加载",flush=True)
+    else:
         page.screenshot(path=str(OUT/"launch_failed.png"),full_page=True)
-        raise RuntimeError("已登录首页，但未能从大厅启动寻道大千")
-    page=launched
+        raise RuntimeError("已登录首页，但未能进入寻道大千页面")
     time.sleep(12)
 
     events=[]
