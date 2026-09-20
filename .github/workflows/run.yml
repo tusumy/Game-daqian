@@ -2,32 +2,51 @@ name: 自动打理大千药田
 
 on:
   schedule:
-    # 国际标准时间。'0 */4 * * *' 代表每 4 小时自动跑一次
     - cron: '0 */4 * * *'
-  workflow_dispatch: # 允许手动在网页上点按钮测试
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   farm:
     runs-on: ubuntu-latest
-    # 核心排雷：强制让系统适配最新的 Node 24 运行环境
+    timeout-minutes: 20
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      
+
     steps:
-    - name: 检查代码
-      uses: actions/checkout@v4
+      - name: 检查代码
+        uses: actions/checkout@v4
 
-    - name: 设置 Python 环境
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: 安装浏览器与视觉AI依赖
-      run: |
-        pip install playwright opencv-python-headless numpy pillow
-        playwright install chromium
+      - name: 安装 Chromium 与图像匹配依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright opencv-python-headless numpy pillow
+          playwright install --with-deps chromium
 
-    - name: 执行修仙种菜
-      env:
-        GAME_URL: ${{ secrets.GAME_URL }}
-      run: python cron_farm.py
+      - name: 执行修仙种菜
+        env:
+          GAME_URL: ${{ secrets.GAME_URL }}
+          GAME_AUTH_JSON: ${{ secrets.GAME_AUTH_JSON }}
+          HEADLESS: '1'
+          VIEWPORT_WIDTH: '800'
+          VIEWPORT_HEIGHT: '900'
+          PYTHONUNBUFFERED: '1'
+        run: python cron_farm.py
+
+      - name: 上传调试截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: farm-debug-${{ github.run_number }}
+          path: |
+            final_scene.png
+            error_scene.png
+          if-no-files-found: ignore
+          retention-days: 7
