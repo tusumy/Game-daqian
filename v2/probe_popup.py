@@ -19,12 +19,9 @@ def game_box(page):
                     if best is None or area>best[0]:
                         best=(area,b)
             if best: return best[1]
-    except Exception:
-        pass
-    try:
-        return page.locator("#game-iframe").bounding_box()
-    except Exception:
-        return None
+    except Exception: pass
+    try: return page.locator("#game-iframe").bounding_box()
+    except Exception: return None
 
 def clickr(page,b,rx,ry):
     page.mouse.click(b["x"]+b["width"]*rx,b["y"]+b["height"]*ry)
@@ -36,17 +33,21 @@ with sync_playwright() as p:
     page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
     time.sleep(30)
     b=game_box(page)
-    page.screenshot(path=str(OUT/"before_notice_close.png"),full_page=True)
 
+    # 关首屏公告
     if b:
         clickr(page,b,0.852,0.202)
-        time.sleep(5)
-    page.screenshot(path=str(OUT/"after_notice_close.png"),full_page=True)
+    time.sleep(58)
+    page.screenshot(path=str(OUT/"main_before_dongfu.png"),full_page=True)
 
-    # 不再猜下一步，纯等待并分阶段截图。
-    for sec in (30,60,90,120):
-        time.sleep(30)
-        page.screenshot(path=str(OUT/f"wait_{sec}s.png"),full_page=True)
+    b=game_box(page)
+    if b:
+        # 当前主界面底部“洞府”中心的实测相对坐标
+        clickr(page,b,0.277,0.953)
+    time.sleep(8)
+    page.screenshot(path=str(OUT/"after_dongfu.png"),full_page=True)
+    time.sleep(8)
+    page.screenshot(path=str(OUT/"after_dongfu_16s.png"),full_page=True)
 
     (OUT/"geometry.json").write_text(json.dumps({"box":b},ensure_ascii=False,indent=2),encoding="utf-8")
     context.storage_state(path=str(OUT/"storage_state.json"))
