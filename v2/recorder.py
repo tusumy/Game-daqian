@@ -218,7 +218,18 @@ def _click_and_follow_page(page, target, label):
     context = page.context
     before = list(context.pages)
     print(f"[+] 点击大厅入口: {label}")
-    target.click(timeout=8000, force=True)
+    try:
+        target.scroll_into_view_if_needed(timeout=5000)
+    except Exception:
+        pass
+    try:
+        target.hover(timeout=5000)
+    except Exception:
+        pass
+    try:
+        target.click(timeout=8000)
+    except Exception:
+        target.click(timeout=8000, force=True)
     time.sleep(3)
 
     after = list(context.pages)
@@ -284,13 +295,13 @@ def enter_xddq_from_portal(page):
             print(f"[PAGE] 轮播第 {step + 1} 次检查: {title!r}")
 
             if title == "寻道大千":
-                active = page.locator('.swiper-slide-active [data-aspm-param*="gameId=xddq"]')
+                active = page.locator('.swiper-slide-active .swiper-slide-content[data-aspm-param*="gameId=xddq"]')
                 if active.count() == 0:
-                    active = page.locator('.swiper-slide-active:has-text("寻道大千")')
+                    active = page.locator('.swiper-slide-active [data-aspm-param*="gameId=xddq"]')
                 if active.count() > 0:
-                    btn = active.first.locator('img[alt="立即启动"]')
-                    target = btn.first if btn.count() > 0 else active.first
-                    launched = _click_and_follow_page(page, target, "轮播寻道大千-立即启动")
+                    # React 的启动事件绑在整张 swiper-slide-content 上，
+                    # “立即启动”只是里面的一张图片。
+                    launched = _click_and_follow_page(page, active.first, "轮播寻道大千整卡")
                     time.sleep(10)
 
                     if launched is not page:

@@ -358,34 +358,17 @@ def capture_portal_login_qr(page):
 
 def wait_portal_login_success(page):
     deadline = time.time() + SCAN_TIMEOUT
-    pc_auth_seen_at = None
 
     while time.time() < deadline:
-        # 完整成功必须回到游戏中心首页，并且右侧账号区不再要求登录。
-        if "/home" in page.url:
+        if pc_web_auth_ready(page):
+            print("[+] 已收到 pcweb 扫码认证结果，认证成功")
             try:
-                if wait_portal_ready(page, 8) and not portal_login_required(page):
-                    print("[+] 扫码后已回到首页，账号区确认登录成功")
-                    return True
+                page.context.storage_state(path=str(QR_OUT / "pc_auth_state.json"))
+                recorder.save_page_diagnostics(page, "pc_auth_success")
+                page.screenshot(path=str(QR_OUT / "pc_auth_success.png"), full_page=True)
             except Exception:
                 pass
-
-        # pcweb token 只代表扫码认证通过，不再把它当完整首页登录。
-        if pc_web_auth_ready(page):
-            if pc_auth_seen_at is None:
-                pc_auth_seen_at = time.time()
-                print("[+] 已收到 pcweb 扫码认证结果，继续等待网站完成回首页登录")
-
-            # 给前端足够时间自行跳转；若一直停在 /login，再回首页验证一次。
-            if time.time() - pc_auth_seen_at >= 12 and "/login" in page.url:
-                print("[*] 扫码认证已完成但登录页未自动返回，主动回首页验证最终账号态")
-                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(4)
-                if wait_portal_ready(page, 20) and not portal_login_required(page):
-                    print("[+] 回首页后账号区确认登录成功")
-                    return True
-                # 若仍匿名，继续等待而不是误报成功。
-                print("[-] 回首页后仍是匿名态，继续等待登录流程")
+            return True
 
         snapshot_state(page, "wait_portal_login")
         time.sleep(1)
@@ -395,10 +378,15 @@ def wait_portal_login_success(page):
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 960},
-            device_scale_factor=1,
-        )
+        kwargs = {
+            "viewport": {"width": 1280, "height": 960},
+            "device_scale_factor": 1,
+        }
+        try:
+            kwargs["storage_state"] = recorder.load_storage_state()
+        except Exception as exc:
+            print(f"[*] 未加载预存登录态: {exc}")
+        context = browser.new_context(**kwargs)
 
         def bind_page(p):
             try:
@@ -425,33 +413,39 @@ def run():
             recorder.save_page_diagnostics(page, "portal_before_login")
             snapshot_state(page, "portal_before_login")
 
-            qr = capture_portal_login_qr(page)
-            if qr is not None:
-                qr.screenshot(path=str(QR_OUT / "qr.png"))
-                page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
-                write_status({
-                    "state": "waiting_for_scan",
-                    "url": page.url,
-                    "expires_in_seconds": SCAN_TIMEOUT,
-                    "flow": "portal_login",
-                })
-                (QR_OUT / "READY").write_text(
-                    "scan portal qr.png with Alipay", encoding="utf-8"
-                )
-                print(f"[QR_READY] 首页登录二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
+            if pc_web_auth_ready(page):
+                print("[+] 已从预存 storage_state 恢复 pcweb 登录态，跳过扫码")
+            else:
+                qr = capture_portal_login_qr(page)
+                if qr is not None:
+                    qr.screenshot(path=str(QR_OUT / "qr.png"))
+                    page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
+                    write_status({
+                        "state": "waiting_for_scan",
+                        "url": page.url,
+                        "expires_in_seconds": SCAN_TIMEOUT,
+                        "flow": "portal_login",
+                    })
+                    (QR_OUT / "READY").write_text(
+                        "scan portal qr.png with Alipay", encoding="utf-8"
+                    )
+                    print(f"[QR_READY] 首页登录二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
 
-                if not wait_portal_login_success(page):
-                    raise RuntimeError("等待支付宝首页登录扫码超时")
+                    if not wait_portal_login_success(page):
+                        raise RuntimeError("等待支付宝 pcweb 扫码认证超时")
 
-            if portal_login_required(page):
-                recorder.save_page_diagnostics(page, "portal_login_still_required")
-                raise RuntimeError("扫码后首页仍显示“立即登录”，游戏中心登录没有完成")
+            if not pc_web_auth_ready(page):
+                raise RuntimeError("没有可用的 pcweb 登录态")
 
-            recorder.set_marker("portal_logged_in")
+            if "/home" not in page.url:
+                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
+                if not wait_portal_ready(page, 30):
+                    raise RuntimeError("pcweb 认证成功，但返回游戏中心首页失败")
+
+            recorder.set_marker("pc_auth_open_portal")
             context.storage_state(path=str(QR_OUT / "storage_state.json"))
-            recorder.save_page_diagnostics(page, "portal_logged_in")
-            page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
-            print("[+] 游戏中心首页已确认登录，开始启动寻道大千")
+            recorder.save_page_diagnostics(page, "portal_after_pc_auth")
+            print("[+] pcweb 登录态已就绪，开始启动寻道大千")
 
             launched_page = recorder.enter_xddq_from_portal(page)
             if not launched_page:

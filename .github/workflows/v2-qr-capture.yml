@@ -35,12 +35,22 @@ jobs:
           pip install playwright opencv-python-headless numpy
           playwright install --with-deps chromium
 
+      - name: 恢复 #13 pcweb 登录态
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/xddq-auth
+          mkdir -p /tmp/xddq-auth
+          gh run download 35500415126 -n xddq-live-capture-13 -D /tmp/xddq-auth
+          test -f /tmp/xddq-auth/qr/storage_state.json
+          echo "GAME_AUTH_FILE=/tmp/xddq-auth/qr/storage_state.json" >> "$GITHUB_ENV"
+
       - name: 启动扫码会话
         env:
           GAME_URL: ${{ secrets.GAME_URL }}
           GAME_COOKIES_JSON: ${{ secrets.GAME_COOKIES_JSON }}
           GAME_AUTH_JSON: ${{ secrets.GAME_AUTH_JSON }}
-          QR_SCAN_TIMEOUT: '600'
+          QR_SCAN_TIMEOUT: '180'
           PYTHONUNBUFFERED: '1'
         run: |
           rm -rf v2/qr
