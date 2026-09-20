@@ -70,9 +70,22 @@ with sync_playwright() as p:
 
     box = game_box(page)
     if box:
-        # 若加载完成后仍有活动弹窗，再用已验证安全的左侧遮罩点击关闭。
+        # 当前版本在 GitHub runner 上偶尔弹“网络状况不佳 / 重启 / 继续”。
+        # 点击绿色“继续”，避免重启整个会话。
+        page.mouse.click(box["x"] + box["width"] * 0.72, box["y"] + box["height"] * 0.59)
+        time.sleep(8)
+    shot(page, "after_continue")
+
+    box = game_box(page)
+    if box:
+        # 关闭后面残留的公告/活动弹窗：先点公告右上角 X；再点安全遮罩区。
+        page.mouse.click(box["x"] + box["width"] * 0.86, box["y"] + box["height"] * 0.20)
+        time.sleep(3)
         page.mouse.click(box["x"] + box["width"] * 0.03, box["y"] + box["height"] * 0.50)
-        time.sleep(4)
-    shot(page, "after_final_backdrop")
+        time.sleep(3)
+    shot(page, "after_notice_close")
+
+    time.sleep(25)
+    shot(page, "main_ready")
 
     browser.close()
