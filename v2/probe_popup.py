@@ -9,6 +9,7 @@ OUT.mkdir(parents=True,exist_ok=True)
 AUTH="/tmp/xddq20/qr/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
+    "privacy_agree": ("v2/templates/privacy_agree.png", 0.88),
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
     "continue": ("v2/templates/continue.png", 0.84),
@@ -57,8 +58,9 @@ with sync_playwright() as p:
                 matches[name]={"score":float(m[0]),"x":float(m[1][0]),"y":float(m[1][1]),"threshold":thr}
 
         action=None
-        # 弹窗优先关闭；网络提示其次；主界面最后进洞府。
-        for name in ("notice_x","event_x","continue","dongfu"):
+        # 用户已明确授权个人信息保护提示：优先点“同意”。
+        # 之后再关其它弹窗、处理网络提示，最后进洞府。
+        for name in ("privacy_agree","notice_x","event_x","continue","dongfu"):
             info=matches.get(name)
             if not info or info["score"] < info["threshold"]:
                 continue
@@ -69,7 +71,7 @@ with sync_playwright() as p:
             action=name
             events.append({"t":round(now,2),"action":name,"score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
             print("[VISION]",events[-1],flush=True)
-            time.sleep(4 if name!="dongfu" else 10)
+            time.sleep(6 if name=="privacy_agree" else (4 if name!="dongfu" else 10))
             if name=="dongfu":
                 clicked_dongfu=True
             break
