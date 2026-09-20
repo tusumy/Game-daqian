@@ -214,89 +214,100 @@ def has_canvas(page):
         return False
 
 
+def _click_and_follow_page(page, target, label):
+    context = page.context
+    before = list(context.pages)
+    print(f"[+] 点击大厅入口: {label}")
+    target.click(timeout=8000, force=True)
+    time.sleep(3)
+
+    after = list(context.pages)
+    spawned = [p for p in after if p not in before]
+    if spawned:
+        launched = spawned[-1]
+        try:
+            launched.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        print(f"[+] 检测到新游戏页: {launched.url}")
+        return launched
+
+    print(f"[PAGE] 点击后仍在当前页 url={page.url}; frames={len(page.frames)}")
+    return page
+
+
 def enter_xddq_from_portal(page):
     print(f"[PAGE] url={page.url} title={page.title()!r}")
     if has_canvas(page):
         print("[+] 已检测到 canvas，当前已在游戏页")
-        return True
+        return page
 
+    # 首页真正的游戏启动入口使用 gameId=xddq。
+    # 排行榜里的 appId 卡片只用于排行/展示，不再把它当最终启动入口。
+    launch_selectors = [
+        '[data-aspm-desc="feeds-游戏卡片_N"][data-aspm-param*="gameId=xddq"]',
+        '[data-aspm-desc="Banner-轮播卡片_N"][data-aspm-param*="gameId=xddq"]',
+        '[data-aspm-param*="gameId=xddq"]',
+    ]
+
+    for selector in launch_selectors:
+        try:
+            loc = page.locator(selector)
+            if loc.count() == 0:
+                continue
+
+            # feeds 卡通常是实际可点击游戏卡；banner 可能处于非当前轮播页。
+            target = loc.first
+            launched = _click_and_follow_page(page, target, selector)
+            time.sleep(8)
+
+            if launched is not page:
+                return launched
+            if has_canvas(page) or recorder_frames_present():
+                return page
+
+            # 某些版本会在首页内嵌 iframe 载入游戏，先把 frame URL 记录下来。
+            frame_urls = [f.url for f in page.frames]
+            print(f"[PAGE] 启动点击后的 frame urls: {frame_urls}")
+            if len(page.frames) > 1:
+                return page
+        except Exception as exc:
+            print(f"[-] 游戏启动入口 {selector} 点击失败: {exc}")
+
+    # 兼容旧的直接链接/文本入口。
     selectors = [
-        '[data-aspm-param*="appId=2021004127623300"]',
         'a[href*="/game/xddq"]',
         'a[href*="xddq"]',
         'a:has-text("寻道大千")',
-        'a:has-text("寻道")',
         '[title*="寻道大千"]',
-        '[title*="寻道"]',
         '[aria-label*="寻道大千"]',
-        '[aria-label*="寻道"]',
-        'img[alt*="寻道大千"]',
-        'img[alt*="寻道"]',
     ]
-
     for selector in selectors:
         try:
-            locator = page.locator(selector)
-            if locator.count() > 0:
-                target = locator.first
-                print(f"[+] 大厅命中入口: {selector}")
-                if selector.startswith("img"):
-                    card = target.locator("xpath=ancestor::*[@data-aspm-param][1]")
-                    if card.count() > 0:
-                        target = card
-                    else:
-                        # React 卡片没有 <a> 时，直接点图片也会冒泡到卡片点击事件。
-                        target = target
-                target.click(timeout=5000)
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=15000)
-                except Exception:
-                    pass
-                time.sleep(8)
-                print(f"[PAGE] 点击入口后 url={page.url}")
-                if has_canvas(page):
-                    return True
-        except Exception as exc:
-            print(f"[-] 入口 {selector} 点击失败: {exc}")
-
-    # 当前玩一玩首页是游戏排行页；2026-09-20 用户确认寻道大千排第 4。
-    # 只有显式名称/链接都找不到时，才用“第 4 个可见游戏卡片”兜底。
-    try:
-        cards = page.locator('a[href*="/game/"]:visible')
-        unique = []
-        seen = set()
-        for i in range(cards.count()):
-            card = cards.nth(i)
-            href = card.get_attribute("href") or ""
-            if not href or href in seen:
+            loc = page.locator(selector)
+            if loc.count() == 0:
                 continue
-            seen.add(href)
-            unique.append(card)
-        if len(unique) >= 4:
-            print("[+] 大厅按当前排行兜底：点击第 4 个游戏卡片")
-            unique[3].click(timeout=5000)
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=15000)
-            except Exception:
-                pass
+            launched = _click_and_follow_page(page, loc.first, selector)
             time.sleep(8)
-            print(f"[PAGE] 排行第 4 入口后 url={page.url}")
-            if has_canvas(page):
-                return True
-    except Exception as exc:
-        print(f"[-] 排行第 4 入口点击失败: {exc}")
+            if launched is not page or has_canvas(page):
+                return launched
+        except Exception as exc:
+            print(f"[-] 兼容入口 {selector} 点击失败: {exc}")
 
     direct_url = "https://www.wanyiwan.top/game/xddq"
-    print(f"[*] 大厅未找到可点击入口，直接访问 {direct_url}")
+    print(f"[*] 大厅启动入口均未建立游戏连接，最后尝试直达 {direct_url}")
     page.goto(direct_url, wait_until="domcontentloaded", timeout=60000)
     time.sleep(10)
     print(f"[PAGE] 直达后 url={page.url} title={page.title()!r}")
     if has_canvas(page):
-        return True
+        return page
 
     save_page_diagnostics(page, "portal_stuck")
-    return False
+    return None
 
+
+def recorder_frames_present():
+    return bool(frames)
 
 def plant_any_available_seed(page, cell="unknown"):
     """在当前种子面板里种任意可用种子。
@@ -464,16 +475,26 @@ def run():
             "storage_state": storage_state,
         }
         context = browser.new_context(**kwargs)
+
+        def bind_ws(p):
+            try:
+                p.on("websocket", hook_websocket)
+            except Exception:
+                pass
+
+        context.on("page", bind_ws)
         page = context.new_page()
-        page.on("websocket", hook_websocket)
+        bind_ws(page)
 
         try:
             set_marker("open_game")
             page.goto(GAME_URL or "https://www.wanyiwan.top/game/xddq", wait_until="domcontentloaded", timeout=60000)
             time.sleep(8)
 
-            if not enter_xddq_from_portal(page):
+            launched_page = enter_xddq_from_portal(page)
+            if not launched_page:
                 raise RuntimeError("已登录万一玩，但仍无法进入寻道大千；已保存 portal_stuck 诊断文件")
+            page = launched_page
 
             time.sleep(4)
             save_page_diagnostics(page, "game_entry")

@@ -306,9 +306,20 @@ def run():
             kwargs["storage_state"] = storage
 
         context = browser.new_context(**kwargs)
+
+        def bind_page(p):
+            try:
+                p.on("websocket", recorder.hook_websocket)
+            except Exception:
+                pass
+            try:
+                hook_http(p)
+            except Exception:
+                pass
+
+        context.on("page", bind_page)
         page = context.new_page()
-        page.on("websocket", recorder.hook_websocket)
-        hook_http(page)
+        bind_page(page)
 
         ok = False
         try:
@@ -390,8 +401,10 @@ def run():
                 time.sleep(4)
                 recorder.save_page_diagnostics(page, "portal_after_pc_auth")
 
-                if not recorder.enter_xddq_from_portal(page):
+                launched_page = recorder.enter_xddq_from_portal(page)
+                if not launched_page:
                     raise RuntimeError("PC 登录成功，但从玩一玩首页未能进入寻道大千")
+                page = launched_page
 
                 game_deadline = time.time() + 90
                 while time.time() < game_deadline:
