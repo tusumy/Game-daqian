@@ -1,0 +1,40 @@
+name: V2 Main UI Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/probe_main.py'
+      - '.github/workflows/v2-main-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Restore post-checkbox state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/xddqstate
+          mkdir -p /tmp/xddqstate
+          gh run download 35505566169 -n xddq-popup-probe-3 -D /tmp/xddqstate
+          test -f /tmp/xddqstate/storage_state_after_checkbox.json
+      - run: python v2/probe_main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xddq-main-probe-${{ github.run_number }}
+          path: v2/main-probe/
+          retention-days: 1
