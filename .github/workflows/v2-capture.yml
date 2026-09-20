@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'auth.json'
+      - 'v2/**'
+      - '.github/workflows/v2-capture.yml'
   workflow_dispatch:
 
 permissions:
