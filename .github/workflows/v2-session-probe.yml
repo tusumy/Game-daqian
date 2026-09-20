@@ -1,0 +1,40 @@
+name: V2 Session Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/probe_session.py'
+      - '.github/workflows/v2-session-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Restore #20 login
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/xddq20
+          mkdir -p /tmp/xddq20
+          gh run download 35503150607 -n xddq-live-capture-20 -D /tmp/xddq20
+          test -f /tmp/xddq20/qr/storage_state.json
+      - run: python v2/probe_session.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xddq-session-probe-${{ github.run_number }}
+          path: v2/session-probe/
+          retention-days: 1
