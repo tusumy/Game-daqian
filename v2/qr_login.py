@@ -375,18 +375,90 @@ def wait_portal_login_success(page):
     return False
 
 
+def _visible_text(page, text):
+    try:
+        loc = page.get_by_text(text, exact=True)
+        for i in range(loc.count()):
+            if loc.nth(i).is_visible():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _click_confirm_login(page):
+    selectors = [
+        lambda: page.get_by_role("button", name="确认登录", exact=True),
+        lambda: page.get_by_text("确认登录", exact=True),
+    ]
+    for make in selectors:
+        try:
+            loc = make()
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                if item.is_visible():
+                    item.click(timeout=5000, force=True)
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def wait_login_frontend_finish(page, timeout=150):
+    deadline = time.time() + timeout
+    auth_seen = False
+    confirm_clicked = False
+
+    while time.time() < deadline:
+        url = page.url
+
+        if "/game/xddq" in url:
+            print(f"[+] 前端登录收尾完成，已跳到游戏页: {url}")
+            return "game"
+
+        if pc_web_auth_ready(page) and not auth_seen:
+            auth_seen = True
+            print("[+] pcweb 扫码认证已成功，等待前端设备检查与登录收尾")
+            try:
+                recorder.save_page_diagnostics(page, "pc_auth_wait_frontend")
+            except Exception:
+                pass
+
+        # 达到 3 台设备上限时必须由用户决定移除哪一台；绝不自动删除。
+        if _visible_text(page, "登录设备数量已达上限"):
+            recorder.save_page_diagnostics(page, "device_limit")
+            write_status({
+                "state": "device_limit",
+                "message": "登录设备数量已达上限，需要用户选择旧设备移除",
+                "url": url,
+            })
+            return "device_limit"
+
+        # 未满上限时，官方弹窗允许不移除任何设备直接“确认登录”。
+        if (not confirm_clicked) and _visible_text(page, "管理登录设备"):
+            if _click_confirm_login(page):
+                confirm_clicked = True
+                print("[+] 检测到普通设备管理提示，已点击“确认登录”（未移除任何设备）")
+
+        # /login/xddq 理论上会直接跳 /game/xddq；保留 home 作为异常诊断信号。
+        if "/home" in url:
+            print("[*] 登录流程回到了首页，检查账号态后再继续")
+            if not portal_login_required(page):
+                return "home"
+
+        snapshot_state(page, "wait_frontend_login_finish")
+        time.sleep(1)
+
+    return None
+
+
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        kwargs = {
-            "viewport": {"width": 1280, "height": 960},
-            "device_scale_factor": 1,
-        }
-        try:
-            kwargs["storage_state"] = recorder.load_storage_state()
-        except Exception as exc:
-            print(f"[*] 未加载预存登录态: {exc}")
-        context = browser.new_context(**kwargs)
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 960},
+            device_scale_factor=1,
+        )
 
         def bind_page(p):
             try:
@@ -404,70 +476,75 @@ def run():
 
         ok = False
         try:
-            recorder.set_marker("open_portal")
-            page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
-            if not wait_portal_ready(page, 45):
-                recorder.save_page_diagnostics(page, "portal_not_ready")
-                raise RuntimeError("支付宝游戏中心首页 45 秒内没有加载完成")
+            # 直接走带 gameId 的官方登录路由。前端成功收尾后会自行 replace 到 /game/xddq。
+            recorder.set_marker("open_login_xddq")
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
 
-            recorder.save_page_diagnostics(page, "portal_before_login")
-            snapshot_state(page, "portal_before_login")
+            # 清掉可能残留的半截 pcweb 状态，只让这次二维码登录驱动完整 onSuccess 流程。
+            try:
+                page.evaluate("""() => {
+                  localStorage.removeItem('x-game-token-pcweb');
+                  localStorage.removeItem('x-game-uid-pcweb');
+                }""")
+            except Exception:
+                pass
 
-            if pc_web_auth_ready(page):
-                print("[+] 已从预存 storage_state 恢复 pcweb 登录态，跳过扫码")
-            else:
-                qr = capture_portal_login_qr(page)
-                if qr is not None:
-                    qr.screenshot(path=str(QR_OUT / "qr.png"))
-                    page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
-                    write_status({
-                        "state": "waiting_for_scan",
-                        "url": page.url,
-                        "expires_in_seconds": SCAN_TIMEOUT,
-                        "flow": "portal_login",
-                    })
-                    (QR_OUT / "READY").write_text(
-                        "scan portal qr.png with Alipay", encoding="utf-8"
-                    )
-                    print(f"[QR_READY] 首页登录二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
+            qr_canvas = None
+            qr_deadline = time.time() + 90
+            while time.time() < qr_deadline:
+                qr_canvas = qr_locator(page)
+                if qr_canvas is not None:
+                    break
+                snapshot_state(page, "wait_login_xddq_qr")
+                time.sleep(1)
 
-                    if not wait_portal_login_success(page):
-                        raise RuntimeError("等待支付宝 pcweb 扫码认证超时")
+            if qr_canvas is None:
+                recorder.save_page_diagnostics(page, "login_xddq_qr_missing")
+                raise RuntimeError("/login/xddq 已打开，但 90 秒内没有生成二维码")
 
-            if not pc_web_auth_ready(page):
-                raise RuntimeError("没有可用的 pcweb 登录态")
+            qr_canvas.screenshot(path=str(QR_OUT / "qr.png"))
+            page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
+            write_status({
+                "state": "waiting_for_scan",
+                "url": page.url,
+                "expires_in_seconds": SCAN_TIMEOUT,
+                "flow": "login_xddq_frontend_owned",
+            })
+            (QR_OUT / "READY").write_text(
+                "scan qr.png with Alipay", encoding="utf-8"
+            )
+            print(f"[QR_READY] /login/xddq 二维码已生成，等待扫码，最多 {SCAN_TIMEOUT} 秒")
 
-            if "/home" not in page.url:
-                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
-                if not wait_portal_ready(page, 30):
-                    raise RuntimeError("pcweb 认证成功，但返回游戏中心首页失败")
+            result = wait_login_frontend_finish(page, timeout=SCAN_TIMEOUT)
+            if result == "device_limit":
+                raise RuntimeError("登录设备数量已达上限，需要用户选择要移除的旧设备")
+            if result is None:
+                raise RuntimeError("扫码后前端登录收尾超时，没有进入寻道大千")
 
-            recorder.set_marker("pc_auth_open_portal")
-            context.storage_state(path=str(QR_OUT / "storage_state.json"))
-            recorder.save_page_diagnostics(page, "portal_after_pc_auth")
-            print("[+] pcweb 登录态已就绪，开始启动寻道大千")
+            if result == "home":
+                # 正常情况不该走这里；若站点改成回首页，就用已登录首页启动游戏。
+                recorder.set_marker("frontend_returned_home")
+                launched = recorder.enter_xddq_from_portal(page)
+                if not launched:
+                    raise RuntimeError("登录成功后回到首页，但未能启动寻道大千")
+                page = launched
 
-            launched_page = recorder.enter_xddq_from_portal(page)
-            if not launched_page:
-                raise RuntimeError("游戏中心已登录，但仍未能启动寻道大千")
-            page = launched_page
-
-            game_deadline = time.time() + 90
+            game_deadline = time.time() + 120
             while time.time() < game_deadline:
-                snapshot_state(page, "wait_game_after_portal_login")
+                snapshot_state(page, "wait_real_game")
                 if real_game_ready(page):
                     break
                 time.sleep(1)
 
             if not real_game_ready(page):
-                recorder.save_page_diagnostics(page, "portal_login_game_not_ready")
-                raise RuntimeError("首页已登录并点击寻道大千，但 90 秒内没有建立游戏连接")
+                recorder.save_page_diagnostics(page, "game_not_ready_after_frontend_login")
+                raise RuntimeError("前端已完成登录跳转，但 120 秒内没有建立真实游戏连接")
 
-            snapshot_state(page, "login_success_detected")
             recorder.set_marker("login_success")
-            write_status({"state": "logged_in", "url": page.url})
             context.storage_state(path=str(QR_OUT / "storage_state.json"))
-            print(f"[+] 登录并进入游戏成功，当前 URL: {page.url}")
+            write_status({"state": "logged_in", "url": page.url})
+            page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
+            print(f"[+] 完整登录并进入游戏成功: {page.url}")
 
             time.sleep(12)
             recorder.save_page_diagnostics(page, "post_login")
