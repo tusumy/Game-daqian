@@ -43,5 +43,17 @@ with sync_playwright() as p:
         clickr(page,b,0.86,0.20)   # 公告右上角 X
         time.sleep(6)
     page.screenshot(path=str(OUT/"main_clean.png"),full_page=True)
+
+    # runner 上游戏资源加载偏慢；等待后若出现“网络状况不佳”，点绿色“继续”。
+    time.sleep(70)
+    page.screenshot(path=str(OUT/"main_wait70.png"),full_page=True)
+    b=box(page)
+    if b:
+        clickr(page,b,0.72,0.59)
+        time.sleep(10)
+        # 某些情况下继续后会再弹一次公告，尝试关闭右上角。
+        clickr(page,b,0.86,0.20)
+        time.sleep(5)
+    page.screenshot(path=str(OUT/"main_final.png"),full_page=True)
     context.storage_state(path=str(OUT/"storage_state_main.json"))
     browser.close()
