@@ -233,6 +233,10 @@ def _click_and_follow_page(page, target, label):
         return launched
 
     print(f"[PAGE] 点击后仍在当前页 url={page.url}; frames={len(page.frames)}")
+    try:
+        save_page_diagnostics(page, "portal_after_launch_click")
+    except Exception:
+        pass
     return page
 
 
@@ -242,8 +246,36 @@ def enter_xddq_from_portal(page):
         print("[+] 已检测到 canvas，当前已在游戏页")
         return page
 
-    # 首页真正的游戏启动入口使用 gameId=xddq。
-    # 排行榜里的 appId 卡片只用于排行/展示，不再把它当最终启动入口。
+    # 真实首页交互：先点排行榜第 4 的寻道大千，让中间 Swiper 切到 index=3，
+    # 再点击当前可见轮播里的“立即启动”。
+    try:
+        rank = page.locator('[data-aspm-desc="排行榜-排行榜游戏_N"][data-aspm-param*="appId=2021004127623300"]')
+        if rank.count() > 0:
+            print("[+] 点击排行榜第 4：寻道大千")
+            rank.first.click(timeout=8000)
+            time.sleep(2.5)
+
+            active_title = ""
+            try:
+                active_title = page.locator(".swiper-slide-active .swiper-game-title").inner_text(timeout=3000).strip()
+            except Exception:
+                pass
+            print(f"[PAGE] 当前轮播标题: {active_title!r}")
+
+            if active_title == "寻道大千":
+                launch_btn = page.locator('.swiper-slide-active img[alt="立即启动"]')
+                if launch_btn.count() > 0:
+                    launched = _click_and_follow_page(page, launch_btn.first, "寻道大千轮播-立即启动")
+                    time.sleep(10)
+                    if launched is not page:
+                        return launched
+                    if has_canvas(page) or recorder_frames_present():
+                        return page
+                    print(f"[PAGE] 点击立即启动后 frame urls: {[f.url for f in page.frames]}")
+    except Exception as exc:
+        print(f"[-] 排行榜→轮播启动寻道失败: {exc}")
+
+    # 备用入口：直接点带 gameId=xddq 的游戏卡。
     launch_selectors = [
         '[data-aspm-desc="feeds-游戏卡片_N"][data-aspm-param*="gameId=xddq"]',
         '[data-aspm-desc="Banner-轮播卡片_N"][data-aspm-param*="gameId=xddq"]',
