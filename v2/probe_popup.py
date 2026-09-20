@@ -28,6 +28,22 @@ def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
 
+def connection_confirm_point(img):
+    # “连接失败，返回登陆界面”的橙黄色“确定”按钮。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=350,560,600,700
+    roi=hsv[y0:y1,x0:x1]
+    mask=cv2.inRange(roi,np.array([5,80,100]),np.array([35,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        if area < 1800 or w < 80 or h < 30:
+            continue
+        if best is None or area>best[0]:
+            best=(area,(float(cent[i][0]+x0),float(cent[i][1]+y0)))
+    return best[1] if best else None
+
 def privacy_agree_point(img):
     # “个人信息保护提示”的绿色“同意”按钮位于游戏画面中下部。
     # 只在这块有限区域寻找大面积高饱和绿色矩形，避免误点游戏内其它元素。
@@ -75,6 +91,28 @@ with sync_playwright() as p:
                 matches[name]={"score":float(m[0]),"x":float(m[1][0]),"y":float(m[1][1]),"threshold":thr}
 
         action=None
+
+        # 连接失败提示可安全确认；确认后从已登录大厅重新启动一次。
+        if not last_click.get("connection_confirm"):
+            cp=connection_confirm_point(img)
+            if cp:
+                page.mouse.click(cp[0],cp[1])
+                last_click["connection_confirm"]=now
+                action="connection_confirm"
+                events.append({"t":round(now,2),"action":"connection_confirm","x":round(cp[0],1),"y":round(cp[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(6)
+                try:
+                    page.goto(HOME_URL,wait_until="domcontentloaded",timeout=60000)
+                    time.sleep(8)
+                    relaunched=recorder.enter_xddq_from_portal(page)
+                    if relaunched:
+                        page=relaunched
+                        time.sleep(12)
+                        events.append({"t":round(time.time(),2),"action":"relaunch_after_connection_failure"})
+                        print("[VISION]",events[-1],flush=True)
+                except Exception as e:
+                    print("[!] 重连恢复失败:",repr(e),flush=True)
 
         # 用户已明确授权个人信息保护提示。仅在检测到指定绿色按钮时点击一次。
         if not last_click.get("privacy_agree"):
