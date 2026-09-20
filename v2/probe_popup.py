@@ -58,7 +58,7 @@ with sync_playwright() as p:
         clickr(page,box,0.65,0.85)
         time.sleep(1)
         clickr(page,box,0.50,0.80)
-        time.sleep(8)
+        time.sleep(55)
 
     page.screenshot(path=str(OUT/"activity_opened.png"), full_page=True)
     (OUT/"geometry.json").write_text(json.dumps({"box":box,"frames":[f.url for f in page.frames]}, ensure_ascii=False, indent=2), encoding="utf-8")
