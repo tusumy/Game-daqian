@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 QR_OUT = ROOT / "v2" / "qr"
 QR_OUT.mkdir(parents=True, exist_ok=True)
 
-GAME_URL = os.getenv("GAME_URL") or "https://www.wanyiwan.top/game/xddq"
+LOGIN_URL = "https://www.wanyiwan.top/login/xddq"
+GAME_URL = "https://www.wanyiwan.top/game/xddq"
+PORTAL_URL = "https://www.wanyiwan.top/"
 SCAN_TIMEOUT = int(os.getenv("QR_SCAN_TIMEOUT", "900"))
 
 
@@ -311,7 +313,7 @@ def run():
         ok = False
         try:
             recorder.set_marker("open_login")
-            page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
             snapshot_state(page, "after_goto")
 
             deadline = time.time() + 90
@@ -382,7 +384,7 @@ def run():
                 print("[+] 支付宝 PC 登录已成功，保存登录态并从玩一玩首页进入游戏")
                 context.storage_state(path=str(QR_OUT / "storage_state.json"))
                 recorder.set_marker("pc_auth_open_portal")
-                page.goto("https://www.wanyiwan.top/", wait_until="domcontentloaded", timeout=60000)
+                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
                 time.sleep(4)
                 recorder.save_page_diagnostics(page, "portal_after_pc_auth")
 
