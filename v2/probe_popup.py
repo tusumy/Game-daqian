@@ -9,7 +9,6 @@ OUT.mkdir(parents=True,exist_ok=True)
 AUTH="/tmp/xddq20/qr/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
-    "privacy_agree": ("v2/templates/privacy_agree.png", 0.88),
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
     "continue": ("v2/templates/continue.png", 0.84),
@@ -28,6 +27,24 @@ def best_match(img, tpl_path):
 def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
+
+def privacy_agree_point(img):
+    # “个人信息保护提示”的绿色“同意”按钮位于游戏画面中下部。
+    # 只在这块有限区域寻找大面积高饱和绿色矩形，避免误点游戏内其它元素。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=400,560,700,700
+    roi=hsv[y0:y1,x0:x1]
+    mask=cv2.inRange(roi,np.array([35,80,80]),np.array([95,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        if area < 1800 or w < 80 or h < 30:
+            continue
+        score=area
+        if best is None or score>best[0]:
+            best=(score,(float(cent[i][0]+x0),float(cent[i][1]+y0)))
+    return best[1] if best else None
 
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True)
@@ -58,23 +75,35 @@ with sync_playwright() as p:
                 matches[name]={"score":float(m[0]),"x":float(m[1][0]),"y":float(m[1][1]),"threshold":thr}
 
         action=None
-        # 用户已明确授权个人信息保护提示：优先点“同意”。
+
+        # 用户已明确授权个人信息保护提示。仅在检测到指定绿色按钮时点击一次。
+        if not last_click.get("privacy_agree"):
+            p=privacy_agree_point(img)
+            if p:
+                page.mouse.click(p[0],p[1])
+                last_click["privacy_agree"]=now
+                action="privacy_agree"
+                events.append({"t":round(now,2),"action":"privacy_agree","x":round(p[0],1),"y":round(p[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(6)
+
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
-        for name in ("privacy_agree","notice_x","event_x","continue","dongfu"):
-            info=matches.get(name)
-            if not info or info["score"] < info["threshold"]:
-                continue
-            if now-last_click.get(name,0) < 8:
-                continue
-            page.mouse.click(info["x"],info["y"])
-            last_click[name]=now
-            action=name
-            events.append({"t":round(now,2),"action":name,"score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
-            print("[VISION]",events[-1],flush=True)
-            time.sleep(6 if name=="privacy_agree" else (4 if name!="dongfu" else 10))
-            if name=="dongfu":
-                clicked_dongfu=True
-            break
+        if not action:
+          for name in ("notice_x","event_x","continue","dongfu"):
+              info=matches.get(name)
+              if not info or info["score"] < info["threshold"]:
+                  continue
+              if now-last_click.get(name,0) < 8:
+                  continue
+              page.mouse.click(info["x"],info["y"])
+              last_click[name]=now
+              action=name
+              events.append({"t":round(now,2),"action":name,"score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
+              print("[VISION]",events[-1],flush=True)
+              time.sleep(4 if name!="dongfu" else 10)
+              if name=="dongfu":
+                  clicked_dongfu=True
+              break
 
         if not action:
             time.sleep(2)
