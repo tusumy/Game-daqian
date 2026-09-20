@@ -221,6 +221,7 @@ def enter_xddq_from_portal(page):
         return True
 
     selectors = [
+        '[data-aspm-param*="appId=2021004127623300"]',
         'a[href*="/game/xddq"]',
         'a[href*="xddq"]',
         'a:has-text("寻道大千")',
@@ -240,9 +241,12 @@ def enter_xddq_from_portal(page):
                 target = locator.first
                 print(f"[+] 大厅命中入口: {selector}")
                 if selector.startswith("img"):
-                    target = target.locator("xpath=ancestor::a[1]")
-                    if target.count() == 0:
-                        continue
+                    card = target.locator("xpath=ancestor::*[@data-aspm-param][1]")
+                    if card.count() > 0:
+                        target = card
+                    else:
+                        # React 卡片没有 <a> 时，直接点图片也会冒泡到卡片点击事件。
+                        target = target
                 target.click(timeout=5000)
                 try:
                     page.wait_for_load_state("domcontentloaded", timeout=15000)
@@ -417,6 +421,13 @@ def parse_auth_payload(raw, source_name):
 
 
 def load_storage_state():
+    auth_file = (os.getenv("GAME_AUTH_FILE") or "").strip()
+    if auth_file:
+        path = Path(auth_file)
+        if path.exists():
+            raw = path.read_text(encoding="utf-8")
+            return parse_auth_payload(raw, "GAME_AUTH_FILE")
+
     raw = (os.getenv("GAME_COOKIES_JSON") or "").strip()
     if raw:
         return parse_auth_payload(raw, "GAME_COOKIES_JSON")

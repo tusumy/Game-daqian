@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: xddq-v2-qr-capture
@@ -32,6 +33,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install playwright opencv-python-headless numpy
           playwright install --with-deps chromium
+
+      - name: 恢复最近成功扫码登录态
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/xddq-auth
+          mkdir -p /tmp/xddq-auth
+          gh run download 35499340896 -n xddq-live-capture-9 -D /tmp/xddq-auth || true
+          if [ -f /tmp/xddq-auth/qr/storage_state.json ]; then
+            echo "GAME_AUTH_FILE=/tmp/xddq-auth/qr/storage_state.json" >> "$GITHUB_ENV"
+            echo "已恢复 #9 保存的 pcweb 登录态"
+          else
+            echo "没有可恢复的 pcweb 登录态，将按扫码流程继续"
+          fi
 
       - name: 启动扫码会话
         env:

@@ -323,7 +323,9 @@ def run():
                 snapshot_state(page, "wait_initial")
                 time.sleep(1)
 
-            if is_qr_page(page):
+            if pc_web_auth_ready(page):
+                print("[+] 已从保存的 storage_state 恢复 pcweb 登录态，跳过重新扫码")
+            elif is_qr_page(page):
                 print("[*] 已进入支付宝扫码页，等待二维码组件真正生成")
                 qr = None
                 qr_deadline = time.time() + 90
