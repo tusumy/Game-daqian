@@ -22,23 +22,50 @@ def write_status(data):
     )
 
 
-def is_qr_login(page):
+def is_qr_page(page):
     try:
-        if page.locator("canvas[ke]").count() > 0:
-            return True
         text = page.locator("body").inner_text(timeout=1500)
         return "支付宝扫码即玩" in text or "使用支付宝扫码即玩" in text
     except Exception:
         return False
 
 
+def qr_locator(page):
+    selectors = [
+        ".qrCodeContainer-yvXXNfUj canvas",
+        "[class*='qrCodeContainer'] canvas",
+        "canvas[ke]",
+        "canvas",
+    ]
+    for selector in selectors:
+        try:
+            loc = page.locator(selector)
+            for i in range(loc.count()):
+                item = loc.nth(i)
+                box = item.bounding_box()
+                if box and box["width"] >= 100 and box["height"] >= 100:
+                    return item
+        except Exception:
+            pass
+    return None
+
+
 def real_game_ready(page):
-    if is_qr_login(page):
-        return False
-    if client_user_ready(page):
-        return True
     if recorder.frames:
         return True
+    if client_user_ready(page):
+        return True
+    if is_qr_page(page):
+        return False
+    try:
+        if "/game/xddq" in page.url:
+            canvases = page.locator("canvas")
+            for i in range(canvases.count()):
+                box = canvases.nth(i).bounding_box()
+                if box and box["width"] >= 300 and box["height"] >= 300:
+                    return True
+    except Exception:
+        pass
     return False
 
 
@@ -177,47 +204,48 @@ def run():
 
             deadline = time.time() + 90
             while time.time() < deadline:
-                if is_qr_login(page) or real_game_ready(page):
+                if is_qr_page(page) or real_game_ready(page):
                     break
                 time.sleep(1)
 
-            if is_qr_login(page):
-                qr_locator = page.locator("canvas[ke]").first
-                if qr_locator.count() == 0:
+            if is_qr_page(page):
+                print("[*] 已进入支付宝扫码页，等待二维码组件真正生成")
+                qr = None
+                qr_deadline = time.time() + 90
+                while time.time() < qr_deadline:
+                    qr = qr_locator(page)
+                    if qr is not None:
+                        break
+                    if real_game_ready(page):
+                        break
+                    time.sleep(1)
+
+                if real_game_ready(page):
+                    print("[+] 等二维码期间检测到游戏已连接，直接继续")
+                elif qr is None:
                     recorder.save_page_diagnostics(page, "qr_missing_canvas")
-                    raise RuntimeError("检测到支付宝扫码页，但没有找到二维码 canvas")
+                    raise RuntimeError("支付宝扫码页已加载，但二维码组件 90 秒内仍未生成")
+                else:
+                    qr.screenshot(path=str(QR_OUT / "qr.png"))
+                    page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
+                    write_status({
+                        "state": "waiting_for_scan",
+                        "url": page.url,
+                        "expires_in_seconds": SCAN_TIMEOUT,
+                    })
+                    (QR_OUT / "READY").write_text("scan qr.png with Alipay", encoding="utf-8")
+                    print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
 
-                qr_locator.screenshot(path=str(QR_OUT / "qr.png"))
-                page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
-                write_status({
-                    "state": "waiting_for_scan",
-                    "url": page.url,
-                    "expires_in_seconds": SCAN_TIMEOUT,
-                })
-                (QR_OUT / "READY").write_text("scan qr.png with Alipay", encoding="utf-8")
-                print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
-
-                deadline = time.time() + SCAN_TIMEOUT
-                clear_since = None
-                while time.time() < deadline:
-                    if is_qr_login(page):
-                        clear_since = None
-                    else:
+                    deadline = time.time() + SCAN_TIMEOUT
+                    while time.time() < deadline:
                         if real_game_ready(page):
                             break
-                        if "/game/xddq" in page.url:
-                            if clear_since is None:
-                                clear_since = time.time()
-                            elif time.time() - clear_since >= 8:
-                                break
-                        else:
-                            clear_since = None
-                    time.sleep(1)
-                else:
-                    raise RuntimeError("等待支付宝扫码超时")
+                        time.sleep(1)
+                    else:
+                        raise RuntimeError("等待支付宝扫码超时")
             elif not real_game_ready(page):
                 recorder.save_page_diagnostics(page, "login_state_unknown")
-                raise RuntimeError("既没有出现支付宝二维码，也没有检测到真实游戏连接")
+                raise RuntimeError("既没有出现支付宝扫码页，也没有检测到真实游戏连接")
 
             recorder.set_marker("login_success")
             write_status({"state": "logged_in", "url": page.url})
