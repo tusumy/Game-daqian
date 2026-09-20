@@ -289,6 +289,83 @@ def probe_farm(page):
                 time.sleep(0.8)
 
 
+def portal_login_required(page):
+    try:
+        btn = page.locator('img[alt="立即登录"]')
+        for i in range(btn.count()):
+            if btn.nth(i).is_visible():
+                return True
+    except Exception:
+        pass
+    try:
+        return page.get_by_text("登录后查看VIP等级", exact=False).count() > 0
+    except Exception:
+        return False
+
+
+def wait_portal_ready(page, timeout=45):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if page.title() == "支付宝游戏中心" and page.locator(".swiper-button-next").count() > 0:
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
+
+def capture_portal_login_qr(page):
+    if not portal_login_required(page):
+        return None
+
+    print("[*] 首页当前是匿名态，点击右侧“立即登录”")
+    try:
+        page.evaluate("""() => {
+          localStorage.removeItem('x-game-token-pcweb');
+          localStorage.removeItem('x-game-uid-pcweb');
+        }""")
+    except Exception:
+        pass
+
+    btn = page.locator('img[alt="立即登录"]')
+    visible = None
+    for i in range(btn.count()):
+        try:
+            if btn.nth(i).is_visible():
+                visible = btn.nth(i)
+                break
+        except Exception:
+            pass
+    if visible is None:
+        raise RuntimeError("首页显示未登录，但找不到可见的“立即登录”按钮")
+
+    visible.click(timeout=8000, force=True)
+
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        if not portal_login_required(page):
+            print("[+] 首页点击登录后直接进入已登录态")
+            return None
+        qr = qr_locator(page)
+        if qr is not None:
+            return qr
+        snapshot_state(page, "wait_portal_qr")
+        time.sleep(1)
+    raise RuntimeError("点击首页“立即登录”后 45 秒内没有出现支付宝二维码")
+
+
+def wait_portal_login_success(page):
+    deadline = time.time() + SCAN_TIMEOUT
+    while time.time() < deadline:
+        if not portal_login_required(page):
+            print("[+] 首页账号区已切换为登录态")
+            return True
+        snapshot_state(page, "wait_portal_login")
+        time.sleep(1)
+    return False
+
+
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
