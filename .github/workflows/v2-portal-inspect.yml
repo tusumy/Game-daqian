@@ -1,0 +1,30 @@
+name: V2 Portal JS Inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/inspect_portal_js.py'
+      - '.github/workflows/v2-portal-inspect.yml'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Dump portal bundles
+        run: python v2/inspect_portal_js.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xddq-portal-js-${{ github.run_number }}
+          path: v2/portal-js/
+          retention-days: 1
