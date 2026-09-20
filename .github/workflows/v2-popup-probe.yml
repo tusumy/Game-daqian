@@ -16,7 +16,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,14 +25,14 @@ jobs:
       - run: |
           pip install playwright opencv-python-headless numpy opencv-python-headless
           playwright install --with-deps chromium
-      - name: Restore #20 login
+      - name: Restore latest accepted game state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf /tmp/xddq20
-          mkdir -p /tmp/xddq20
-          gh run download 35503150607 -n xddq-live-capture-20 -D /tmp/xddq20
-          test -f /tmp/xddq20/qr/storage_state.json
+          rm -rf /tmp/xddq14
+          mkdir -p /tmp/xddq14
+          gh run download 35541190139 -n xddq-popup-probe-14 -D /tmp/xddq14
+          test -f /tmp/xddq14/storage_state.json
       - run: python v2/probe_popup.py
       - uses: actions/upload-artifact@v4
         if: always()
