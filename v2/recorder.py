@@ -240,94 +240,100 @@ def _click_and_follow_page(page, target, label):
     return page
 
 
+def _click_and_follow_page(page, target, label):
+    context = page.context
+    before = list(context.pages)
+    print(f"[+] 点击大厅入口: {label}")
+    target.click(timeout=8000, force=True)
+    time.sleep(3)
+
+    after = list(context.pages)
+    spawned = [p for p in after if p not in before]
+    if spawned:
+        launched = spawned[-1]
+        try:
+            launched.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        print(f"[+] 检测到新游戏页: {launched.url}")
+        return launched
+
+    print(f"[PAGE] 点击后仍在当前页 url={page.url}; frames={len(page.frames)}")
+    try:
+        save_page_diagnostics(page, "portal_after_launch_click")
+    except Exception:
+        pass
+    return page
+
+
 def enter_xddq_from_portal(page):
     print(f"[PAGE] url={page.url} title={page.title()!r}")
     if has_canvas(page):
         print("[+] 已检测到 canvas，当前已在游戏页")
         return page
 
-    # 真实首页交互：先点排行榜第 4 的寻道大千，让中间 Swiper 切到 index=3，
-    # 再点击当前可见轮播里的“立即启动”。
+    # 首页左侧排行榜和中间轮播是独立模块。
+    # 不依赖排行位置，直接操作中间轮播，直到当前可见标题是“寻道大千”。
     try:
-        rank = page.locator('[data-aspm-desc="排行榜-排行榜游戏_N"][data-aspm-param*="appId=2021004127623300"]')
-        if rank.count() > 0:
-            print("[+] 点击排行榜第 4：寻道大千")
-            rank.first.click(timeout=8000)
-            time.sleep(2.5)
-
-            active_title = ""
+        for step in range(12):
+            title = ""
             try:
-                active_title = page.locator(".swiper-slide-active .swiper-game-title").inner_text(timeout=3000).strip()
+                title = page.locator(".swiper-slide-active .swiper-game-title").inner_text(timeout=2500).strip()
             except Exception:
                 pass
-            print(f"[PAGE] 当前轮播标题: {active_title!r}")
+            print(f"[PAGE] 轮播第 {step + 1} 次检查: {title!r}")
 
-            if active_title == "寻道大千":
-                launch_btn = page.locator('.swiper-slide-active img[alt="立即启动"]')
-                if launch_btn.count() > 0:
-                    launched = _click_and_follow_page(page, launch_btn.first, "寻道大千轮播-立即启动")
+            if title == "寻道大千":
+                active = page.locator('.swiper-slide-active [data-aspm-param*="gameId=xddq"]')
+                if active.count() == 0:
+                    active = page.locator('.swiper-slide-active:has-text("寻道大千")')
+                if active.count() > 0:
+                    btn = active.first.locator('img[alt="立即启动"]')
+                    target = btn.first if btn.count() > 0 else active.first
+                    launched = _click_and_follow_page(page, target, "轮播寻道大千-立即启动")
                     time.sleep(10)
+
                     if launched is not page:
                         return launched
                     if has_canvas(page) or recorder_frames_present():
                         return page
-                    print(f"[PAGE] 点击立即启动后 frame urls: {[f.url for f in page.frames]}")
+
+                    # 点击后可能在当前页创建真正的游戏 iframe。
+                    game_frames = [
+                        f for f in page.frames
+                        if f is not page.main_frame
+                        and not f.url.startswith("chrome-error://")
+                        and "tracert" not in f.url.lower()
+                    ]
+                    print(f"[PAGE] 点击启动后的有效 frame urls: {[f.url for f in game_frames]}")
+                    if game_frames:
+                        return page
+                break
+
+            next_btn = page.locator(".swiper-button-next")
+            if next_btn.count() == 0:
+                print("[-] 未找到轮播下一张按钮")
+                break
+            next_btn.first.click(timeout=5000, force=True)
+            time.sleep(1.2)
     except Exception as exc:
-        print(f"[-] 排行榜→轮播启动寻道失败: {exc}")
+        print(f"[-] 轮播定位寻道大千失败: {exc}")
 
-    # 备用入口：直接点带 gameId=xddq 的游戏卡。
-    launch_selectors = [
-        '[data-aspm-desc="feeds-游戏卡片_N"][data-aspm-param*="gameId=xddq"]',
-        '[data-aspm-desc="Banner-轮播卡片_N"][data-aspm-param*="gameId=xddq"]',
-        '[data-aspm-param*="gameId=xddq"]',
-    ]
-
-    for selector in launch_selectors:
-        try:
-            loc = page.locator(selector)
-            if loc.count() == 0:
-                continue
-
-            # feeds 卡通常是实际可点击游戏卡；banner 可能处于非当前轮播页。
-            target = loc.first
-            launched = _click_and_follow_page(page, target, selector)
+    # 备用：按 gameId 找到卡片后，先滚动/等待其可见再点击。
+    try:
+        card = page.locator('[data-aspm-param*="gameId=xddq"]').filter(has=page.locator('img[alt="寻道大千"]'))
+        if card.count() > 0:
+            target = card.first
+            target.scroll_into_view_if_needed(timeout=5000)
+            launched = _click_and_follow_page(page, target, "gameId=xddq 备用卡片")
             time.sleep(8)
-
-            if launched is not page:
+            if launched is not page or has_canvas(page) or recorder_frames_present():
                 return launched
-            if has_canvas(page) or recorder_frames_present():
-                return page
-
-            # 某些版本会在首页内嵌 iframe 载入游戏，先把 frame URL 记录下来。
-            frame_urls = [f.url for f in page.frames]
-            print(f"[PAGE] 启动点击后的 frame urls: {frame_urls}")
-            if len(page.frames) > 1:
-                return page
-        except Exception as exc:
-            print(f"[-] 游戏启动入口 {selector} 点击失败: {exc}")
-
-    # 兼容旧的直接链接/文本入口。
-    selectors = [
-        'a[href*="/game/xddq"]',
-        'a[href*="xddq"]',
-        'a:has-text("寻道大千")',
-        '[title*="寻道大千"]',
-        '[aria-label*="寻道大千"]',
-    ]
-    for selector in selectors:
-        try:
-            loc = page.locator(selector)
-            if loc.count() == 0:
-                continue
-            launched = _click_and_follow_page(page, loc.first, selector)
-            time.sleep(8)
-            if launched is not page or has_canvas(page):
-                return launched
-        except Exception as exc:
-            print(f"[-] 兼容入口 {selector} 点击失败: {exc}")
+    except Exception as exc:
+        print(f"[-] gameId=xddq 备用入口失败: {exc}")
 
     direct_url = "https://www.wanyiwan.top/game/xddq"
-    print(f"[*] 大厅启动入口均未建立游戏连接，最后尝试直达 {direct_url}")
+    print(f"[*] 大厅启动入口未建立游戏连接，最后尝试直达 {direct_url}")
     page.goto(direct_url, wait_until="domcontentloaded", timeout=60000)
     time.sleep(10)
     print(f"[PAGE] 直达后 url={page.url} title={page.title()!r}")
