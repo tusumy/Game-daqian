@@ -403,61 +403,7 @@ def run():
             if not ok and not (QR_OUT / "FAILED").exists():
                 mark_failed("扫码抓包进程未正常完成")
             browser.close()
-meError("PC 登录成功，但从玩一玩首页未能进入寻道大千")
-                page = launched_page
-
-                game_deadline = time.time() + 90
-                while time.time() < game_deadline:
-                    snapshot_state(page, "wait_game_after_pc_auth")
-                    if real_game_ready(page):
-                        break
-                    time.sleep(1)
-
-                if not real_game_ready(page):
-                    recorder.save_page_diagnostics(page, "pc_auth_game_not_ready")
-                    raise RuntimeError("PC 登录凭据已拿到，但返回游戏页后未建立游戏连接")
-
-            snapshot_state(page, "login_success_detected")
-            recorder.set_marker("login_success")
-            write_status({"state": "logged_in", "url": page.url})
-            page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
-            context.storage_state(path=str(QR_OUT / "storage_state.json"))
-            print(f"[+] 登录态确认成功，当前 URL: {page.url}")
-
-            time.sleep(12)
-            recorder.save_page_diagnostics(page, "post_login")
-            probe_farm(page)
-            recorder.set_marker("done")
-            time.sleep(5)
-
-            write_status({
-                "state": "done",
-                "url": page.url,
-                "captured_frames": len(recorder.frames),
-            })
-            (QR_OUT / "DONE").write_text(
-                f"frames={len(recorder.frames)}", encoding="utf-8"
-            )
-            ok = True
-
-        except Exception as exc:
-            message = str(exc)
-            print(f"[!] {message}")
-            mark_failed(message)
-            try:
-                recorder.save_page_diagnostics(page, "failure")
-            except Exception:
-                pass
-            raise
-        finally:
-            save_frames()
-            recorder.summarize()
-            if not ok and not (QR_OUT / "FAILED").exists():
-                mark_failed("扫码抓包进程未正常完成")
-            browser.close()
 
 
 if __name__ == "__main__":
     run()
-
-# QR_REFRESH_TRIGGER_12
