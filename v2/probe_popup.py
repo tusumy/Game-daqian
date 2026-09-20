@@ -36,20 +36,18 @@ with sync_playwright() as p:
     page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
     time.sleep(30)
     b=game_box(page)
+    page.screenshot(path=str(OUT/"before_notice_close.png"),full_page=True)
+
+    if b:
+        clickr(page,b,0.852,0.202)
+        time.sleep(5)
+    page.screenshot(path=str(OUT/"after_notice_close.png"),full_page=True)
+
+    # 不再猜下一步，纯等待并分阶段截图。
+    for sec in (30,60,90,120):
+        time.sleep(30)
+        page.screenshot(path=str(OUT/f"wait_{sec}s.png"),full_page=True)
+
     (OUT/"geometry.json").write_text(json.dumps({"box":b},ensure_ascii=False,indent=2),encoding="utf-8")
-    page.screenshot(path=str(OUT/"step0.png"),full_page=True)
-
-    if b:
-        # 这张公告图里右上角 X 的实测相对位置约为 x=85.2%, y=20.2%
-        clickr(page,b,0.852,0.202)
-        time.sleep(4)
-    page.screenshot(path=str(OUT/"step1.png"),full_page=True)
-
-    # 若下一张也是居中弹窗，先只再尝试同一右上角区域一次。
-    if b:
-        clickr(page,b,0.852,0.202)
-        time.sleep(4)
-    page.screenshot(path=str(OUT/"step2.png"),full_page=True)
-
     context.storage_state(path=str(OUT/"storage_state.json"))
     browser.close()
