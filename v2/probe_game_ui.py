@@ -58,9 +58,20 @@ with sync_playwright() as p:
 
     box = game_box(page)
     if box:
-        # 点击游戏区域最左侧中部，位于中心活动弹窗外侧；仅测试 backdrop 是否可关闭。
+        # 关闭首次公告
         page.mouse.click(box["x"] + box["width"] * 0.03, box["y"] + box["height"] * 0.50)
         time.sleep(3)
     shot(page, "after_backdrop")
+
+    # 等主游戏真正加载完成，观察是否出现第二层活动弹窗。
+    time.sleep(35)
+    shot(page, "after_load")
+
+    box = game_box(page)
+    if box:
+        # 再点一次相同的左侧遮罩区，测试活动弹窗是否也可关闭。
+        page.mouse.click(box["x"] + box["width"] * 0.03, box["y"] + box["height"] * 0.50)
+        time.sleep(4)
+    shot(page, "after_second_backdrop")
 
     browser.close()
