@@ -162,6 +162,99 @@ def wait_click(page, name, label, timeout=15, confidence=0.72):
     return False
 
 
+def save_page_diagnostics(page, name):
+    try:
+        info = {
+            "url": page.url,
+            "title": page.title(),
+            "links": page.evaluate(
+                """() => Array.from(document.querySelectorAll('a')).slice(0, 300).map((a, i) => ({
+                    i,
+                    text: (a.innerText || a.textContent || '').trim().slice(0, 120),
+                    href: a.href || '',
+                    title: a.getAttribute('title') || '',
+                    aria: a.getAttribute('aria-label') || ''
+                }))"""
+            ),
+            "images": page.evaluate(
+                """() => Array.from(document.images).slice(0, 300).map((img, i) => ({
+                    i,
+                    alt: img.alt || '',
+                    title: img.title || '',
+                    src: img.src || ''
+                }))"""
+            ),
+        }
+        (OUT / f"{name}.json").write_text(
+            json.dumps(info, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (OUT / f"{name}.html").write_text(page.content(), encoding="utf-8")
+        page.screenshot(path=str(OUT / f"{name}.png"))
+    except Exception as exc:
+        print(f"[-] 保存页面诊断失败: {exc}")
+
+
+def has_canvas(page):
+    try:
+        return bool(page.locator("canvas").count())
+    except Exception:
+        return False
+
+
+def enter_xddq_from_portal(page):
+    print(f"[PAGE] url={page.url} title={page.title()!r}")
+    if has_canvas(page):
+        print("[+] 已检测到 canvas，当前已在游戏页")
+        return True
+
+    selectors = [
+        'a[href*="/game/xddq"]',
+        'a[href*="xddq"]',
+        'a:has-text("寻道大千")',
+        'a:has-text("寻道")',
+        '[title*="寻道大千"]',
+        '[title*="寻道"]',
+        '[aria-label*="寻道大千"]',
+        '[aria-label*="寻道"]',
+        'img[alt*="寻道大千"]',
+        'img[alt*="寻道"]',
+    ]
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+            if locator.count() > 0:
+                target = locator.first
+                print(f"[+] 大厅命中入口: {selector}")
+                if selector.startswith("img"):
+                    target = target.locator("xpath=ancestor::a[1]")
+                    if target.count() == 0:
+                        continue
+                target.click(timeout=5000)
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+                time.sleep(8)
+                print(f"[PAGE] 点击入口后 url={page.url}")
+                if has_canvas(page):
+                    return True
+        except Exception as exc:
+            print(f"[-] 入口 {selector} 点击失败: {exc}")
+
+    direct_url = "https://www.wanyiwan.top/game/xddq"
+    print(f"[*] 大厅未找到可点击入口，直接访问 {direct_url}")
+    page.goto(direct_url, wait_until="domcontentloaded", timeout=60000)
+    time.sleep(10)
+    print(f"[PAGE] 直达后 url={page.url} title={page.title()!r}")
+    if has_canvas(page):
+        return True
+
+    save_page_diagnostics(page, "portal_stuck")
+    return False
+
+
 def summarize():
     sent = defaultdict(Counter)
     recv = defaultdict(Counter)
@@ -283,8 +376,14 @@ def run():
 
         try:
             set_marker("open_game")
-            page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(12)
+            page.goto(GAME_URL or "https://www.wanyiwan.top/game/xddq", wait_until="domcontentloaded", timeout=60000)
+            time.sleep(8)
+
+            if not enter_xddq_from_portal(page):
+                raise RuntimeError("已登录万一玩，但仍无法进入寻道大千；已保存 portal_stuck 诊断文件")
+
+            time.sleep(4)
+            save_page_diagnostics(page, "game_entry")
 
             drag_game(page, 750, 300, 150, 300)
             time.sleep(2)
@@ -294,9 +393,19 @@ def run():
             click_image(page, "close_notice.png", 0.70)
             time.sleep(2)
 
-            wait_click(page, "enter_game_btn.png", "enter_game", 12)
-            wait_click(page, "dongfu_btn.png", "open_dongfu", 15)
-            wait_click(page, "danjie_btn.png", "open_danjie", 15)
+            enter_clicked = wait_click(page, "enter_game_btn.png", "enter_game", 12)
+            if not enter_clicked:
+                print("[*] 未识别到旧版进入游戏按钮，尝试按当前 canvas 状态继续")
+                save_page_diagnostics(page, "after_enter_timeout")
+
+            if not wait_click(page, "dongfu_btn.png", "open_dongfu", 15):
+                save_page_diagnostics(page, "dongfu_timeout")
+                raise RuntimeError("未找到洞府入口；已保存 dongfu_timeout 诊断文件")
+
+            if not wait_click(page, "danjie_btn.png", "open_danjie", 15):
+                save_page_diagnostics(page, "danjie_timeout")
+                raise RuntimeError("未找到丹界药田入口；已保存 danjie_timeout 诊断文件")
+
             time.sleep(4)
 
             blocks = [
