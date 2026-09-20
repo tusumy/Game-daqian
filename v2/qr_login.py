@@ -290,22 +290,12 @@ def probe_farm(page):
 
 
 def run():
-    storage = None
-    try:
-        storage = recorder.load_storage_state()
-    except Exception as exc:
-        print(f"[*] 现有登录态不可用也没关系，将走二维码登录: {exc}")
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        kwargs = {
-            "viewport": {"width": 1280, "height": 960},
-            "device_scale_factor": 1,
-        }
-        if storage:
-            kwargs["storage_state"] = storage
-
-        context = browser.new_context(**kwargs)
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 960},
+            device_scale_factor=1,
+        )
 
         def bind_page(p):
             try:
@@ -323,87 +313,97 @@ def run():
 
         ok = False
         try:
-            recorder.set_marker("open_login")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-            snapshot_state(page, "after_goto")
+            recorder.set_marker("open_portal")
+            page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
+            if not wait_portal_ready(page, 45):
+                recorder.save_page_diagnostics(page, "portal_not_ready")
+                raise RuntimeError("支付宝游戏中心首页 45 秒内没有加载完成")
 
-            deadline = time.time() + 90
-            while time.time() < deadline:
-                if is_qr_page(page) or real_game_ready(page):
+            recorder.save_page_diagnostics(page, "portal_before_login")
+            snapshot_state(page, "portal_before_login")
+
+            qr = capture_portal_login_qr(page)
+            if qr is not None:
+                qr.screenshot(path=str(QR_OUT / "qr.png"))
+                page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
+                write_status({
+                    "state": "waiting_for_scan",
+                    "url": page.url,
+                    "expires_in_seconds": SCAN_TIMEOUT,
+                    "flow": "portal_login",
+                })
+                (QR_OUT / "READY").write_text(
+                    "scan portal qr.png with Alipay", encoding="utf-8"
+                )
+                print(f"[QR_READY] 首页登录二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
+
+                if not wait_portal_login_success(page):
+                    raise RuntimeError("等待支付宝首页登录扫码超时")
+
+            if portal_login_required(page):
+                recorder.save_page_diagnostics(page, "portal_login_still_required")
+                raise RuntimeError("扫码后首页仍显示“立即登录”，游戏中心登录没有完成")
+
+            recorder.set_marker("portal_logged_in")
+            context.storage_state(path=str(QR_OUT / "storage_state.json"))
+            recorder.save_page_diagnostics(page, "portal_logged_in")
+            page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
+            print("[+] 游戏中心首页已确认登录，开始启动寻道大千")
+
+            launched_page = recorder.enter_xddq_from_portal(page)
+            if not launched_page:
+                raise RuntimeError("游戏中心已登录，但仍未能启动寻道大千")
+            page = launched_page
+
+            game_deadline = time.time() + 90
+            while time.time() < game_deadline:
+                snapshot_state(page, "wait_game_after_portal_login")
+                if real_game_ready(page):
                     break
-                snapshot_state(page, "wait_initial")
                 time.sleep(1)
 
-            if pc_web_auth_ready(page):
-                print("[+] 已从保存的 storage_state 恢复 pcweb 登录态，跳过重新扫码")
-            elif is_qr_page(page):
-                print("[*] 已进入支付宝扫码页，等待二维码组件真正生成")
-                qr = None
-                qr_deadline = time.time() + 90
-                while time.time() < qr_deadline:
-                    qr = qr_locator(page)
-                    if qr is not None:
-                        break
-                    if real_game_ready(page):
-                        break
-                    snapshot_state(page, "wait_qr_canvas")
-                    time.sleep(1)
+            if not real_game_ready(page):
+                recorder.save_page_diagnostics(page, "portal_login_game_not_ready")
+                raise RuntimeError("首页已登录并点击寻道大千，但 90 秒内没有建立游戏连接")
 
-                if real_game_ready(page):
-                    print("[+] 等二维码期间检测到游戏已连接，直接继续")
-                elif qr is None:
-                    recorder.save_page_diagnostics(page, "qr_missing_canvas")
-                    raise RuntimeError("支付宝扫码页已加载，但二维码组件 90 秒内仍未生成")
-                else:
-                    qr.screenshot(path=str(QR_OUT / "qr.png"))
-                    page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
-                    write_status({
-                        "state": "waiting_for_scan",
-                        "url": page.url,
-                        "expires_in_seconds": SCAN_TIMEOUT,
-                    })
-                    (QR_OUT / "READY").write_text("scan qr.png with Alipay", encoding="utf-8")
-                    print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
-                    snapshot_state(page, "qr_ready")
+            snapshot_state(page, "login_success_detected")
+            recorder.set_marker("login_success")
+            write_status({"state": "logged_in", "url": page.url})
+            context.storage_state(path=str(QR_OUT / "storage_state.json"))
+            print(f"[+] 登录并进入游戏成功，当前 URL: {page.url}")
 
-                    deadline = time.time() + SCAN_TIMEOUT
-                    left_qr_since = None
-                    while time.time() < deadline:
-                        if pc_web_auth_ready(page):
-                            print("[+] 已检测到 pcweb 登录凭据写入 localStorage")
-                            break
-                        if real_game_ready(page):
-                            break
+            time.sleep(12)
+            recorder.save_page_diagnostics(page, "post_login")
+            probe_farm(page)
+            recorder.set_marker("done")
+            time.sleep(5)
 
-                        current_qr = qr_locator(page)
-                        if current_qr is None and "/login/xddq" not in page.url:
-                            if left_qr_since is None:
-                                left_qr_since = time.time()
-                            elif time.time() - left_qr_since >= 5:
-                                print("[+] 二维码已消失并离开登录页，按扫码成功继续")
-                                break
-                        else:
-                            left_qr_since = None
+            write_status({
+                "state": "done",
+                "url": page.url,
+                "captured_frames": len(recorder.frames),
+            })
+            (QR_OUT / "DONE").write_text(
+                f"frames={len(recorder.frames)}", encoding="utf-8"
+            )
+            ok = True
 
-                        snapshot_state(page, "wait_after_scan")
-                        time.sleep(1)
-                    else:
-                        raise RuntimeError("等待支付宝扫码超时")
-            elif not real_game_ready(page):
-                recorder.save_page_diagnostics(page, "login_state_unknown")
-                raise RuntimeError("既没有出现支付宝扫码页，也没有检测到真实游戏连接")
-
-            if pc_web_auth_ready(page) and not real_game_ready(page):
-                print("[+] 支付宝 PC 登录已成功，保存登录态并从玩一玩首页进入游戏")
-                context.storage_state(path=str(QR_OUT / "storage_state.json"))
-                recorder.set_marker("pc_auth_open_portal")
-                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(4)
-                recorder.save_page_diagnostics(page, "portal_after_pc_auth")
-
-                launched_page = recorder.enter_xddq_from_portal(page)
-                if not launched_page:
-                    raise RuntimeError("PC 登录成功，但从玩一玩首页未能进入寻道大千")
+        except Exception as exc:
+            message = str(exc)
+            print(f"[!] {message}")
+            mark_failed(message)
+            try:
+                recorder.save_page_diagnostics(page, "failure")
+            except Exception:
+                pass
+            raise
+        finally:
+            save_frames()
+            recorder.summarize()
+            if not ok and not (QR_OUT / "FAILED").exists():
+                mark_failed("扫码抓包进程未正常完成")
+            browser.close()
+meError("PC 登录成功，但从玩一玩首页未能进入寻道大千")
                 page = launched_page
 
                 game_deadline = time.time() + 90
