@@ -41,18 +41,28 @@ jobs:
           QR_SCAN_TIMEOUT: '900'
           PYTHONUNBUFFERED: '1'
         run: |
+          rm -rf v2/qr
           mkdir -p v2/qr
-          nohup python v2/qr_login.py > v2/qr/session.log 2>&1 &
+          nohup env RUNNER_TRACKING_ID= python v2/qr_login.py > v2/qr/session.log 2>&1 &
           echo $! > v2/qr/session.pid
 
-          for i in $(seq 1 90); do
+          for i in $(seq 1 120); do
             if [ -f v2/qr/READY ]; then
               echo "二维码已生成"
               exit 0
             fi
+            if [ -f v2/qr/DONE ]; then
+              echo "当前登录态已可直接使用"
+              exit 0
+            fi
+            if [ -f v2/qr/FAILED ]; then
+              cat v2/qr/session.log || true
+              cat v2/qr/FAILED || true
+              exit 1
+            fi
             if ! kill -0 "$(cat v2/qr/session.pid)" 2>/dev/null; then
               cat v2/qr/session.log || true
-              echo "扫码进程提前退出"
+              echo "扫码进程提前退出且没有结果标记"
               exit 1
             fi
             sleep 1
@@ -63,6 +73,7 @@ jobs:
           exit 1
 
       - name: 上传登录二维码
+        if: ${{ hashFiles('v2/qr/qr.png') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: xddq-login-qr-${{ github.run_number }}
@@ -77,11 +88,19 @@ jobs:
         run: |
           pid="$(cat v2/qr/session.pid)"
           for i in $(seq 1 190); do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              wait "$pid"
-              code=$?
+            if [ -f v2/qr/DONE ]; then
               cat v2/qr/session.log || true
-              exit "$code"
+              exit 0
+            fi
+            if [ -f v2/qr/FAILED ]; then
+              cat v2/qr/session.log || true
+              cat v2/qr/FAILED || true
+              exit 1
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat v2/qr/session.log || true
+              echo "扫码进程已退出但没有 DONE/FAILED 标记"
+              exit 1
             fi
             sleep 5
           done

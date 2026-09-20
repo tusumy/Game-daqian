@@ -24,9 +24,27 @@ def write_status(data):
 
 def is_qr_login(page):
     try:
-        return "/login/xddq" in page.url and page.locator("canvas[ke]").count() > 0
+        if page.locator("canvas[ke]").count() > 0:
+            return True
+        text = page.locator("body").inner_text(timeout=1500)
+        return "支付宝扫码即玩" in text or "使用支付宝扫码即玩" in text
     except Exception:
         return False
+
+
+def real_game_ready(page):
+    if is_qr_login(page):
+        return False
+    if client_user_ready(page):
+        return True
+    if recorder.frames:
+        return True
+    return False
+
+
+def mark_failed(message):
+    write_status({"state": "failed", "message": message})
+    (QR_OUT / "FAILED").write_text(message, encoding="utf-8")
 
 
 def client_user_ready(page):
@@ -152,20 +170,24 @@ def run():
         page = context.new_page()
         page.on("websocket", recorder.hook_websocket)
 
+        ok = False
         try:
             recorder.set_marker("open_login")
             page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
 
-            # 等二维码组件渲染，或者现有状态直接登录成功。
-            deadline = time.time() + 45
+            deadline = time.time() + 90
             while time.time() < deadline:
-                if is_qr_login(page) or client_user_ready(page) or "/login/xddq" not in page.url:
+                if is_qr_login(page) or real_game_ready(page):
                     break
                 time.sleep(1)
 
             if is_qr_login(page):
-                qr = page.locator("canvas[ke]").first
-                qr.screenshot(path=str(QR_OUT / "qr.png"))
+                qr_locator = page.locator("canvas[ke]").first
+                if qr_locator.count() == 0:
+                    recorder.save_page_diagnostics(page, "qr_missing_canvas")
+                    raise RuntimeError("检测到支付宝扫码页，但没有找到二维码 canvas")
+
+                qr_locator.screenshot(path=str(QR_OUT / "qr.png"))
                 page.screenshot(path=str(QR_OUT / "login_page.png"), full_page=True)
                 write_status({
                     "state": "waiting_for_scan",
@@ -173,33 +195,66 @@ def run():
                     "expires_in_seconds": SCAN_TIMEOUT,
                 })
                 (QR_OUT / "READY").write_text("scan qr.png with Alipay", encoding="utf-8")
-                print(f"[QR_READY] 等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
+                print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
 
                 deadline = time.time() + SCAN_TIMEOUT
+                clear_since = None
                 while time.time() < deadline:
-                    if client_user_ready(page) or ("/login/xddq" not in page.url and not is_qr_login(page)):
-                        break
-                    time.sleep(2)
+                    if is_qr_login(page):
+                        clear_since = None
+                    else:
+                        if real_game_ready(page):
+                            break
+                        if "/game/xddq" in page.url:
+                            if clear_since is None:
+                                clear_since = time.time()
+                            elif time.time() - clear_since >= 8:
+                                break
+                        else:
+                            clear_since = None
+                    time.sleep(1)
                 else:
-                    write_status({"state": "timeout"})
                     raise RuntimeError("等待支付宝扫码超时")
-            else:
-                print("[+] 不需要扫码，当前浏览器已通过登录页")
+            elif not real_game_ready(page):
+                recorder.save_page_diagnostics(page, "login_state_unknown")
+                raise RuntimeError("既没有出现支付宝二维码，也没有检测到真实游戏连接")
 
             recorder.set_marker("login_success")
             write_status({"state": "logged_in", "url": page.url})
             page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
-            print(f"[+] 扫码登录成功，当前 URL: {page.url}")
+            context.storage_state(path=str(QR_OUT / "storage_state.json"))
+            print(f"[+] 登录态确认成功，当前 URL: {page.url}")
 
-            # 先等真实游戏连接建立，再尝试旧版药田导航。
             time.sleep(12)
+            recorder.save_page_diagnostics(page, "post_login")
             probe_farm(page)
             recorder.set_marker("done")
             time.sleep(5)
 
+            write_status({
+                "state": "done",
+                "url": page.url,
+                "captured_frames": len(recorder.frames),
+            })
+            (QR_OUT / "DONE").write_text(
+                f"frames={len(recorder.frames)}", encoding="utf-8"
+            )
+            ok = True
+
+        except Exception as exc:
+            message = str(exc)
+            print(f"[!] {message}")
+            mark_failed(message)
+            try:
+                recorder.save_page_diagnostics(page, "failure")
+            except Exception:
+                pass
+            raise
         finally:
             save_frames()
             recorder.summarize()
+            if not ok and not (QR_OUT / "FAILED").exists():
+                mark_failed("扫码抓包进程未正常完成")
             browser.close()
 
 
