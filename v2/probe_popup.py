@@ -2,11 +2,12 @@ import time, json
 from pathlib import Path
 import cv2, numpy as np
 from playwright.sync_api import sync_playwright
+import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
 AUTH="/tmp/xddq20/qr/storage_state.json"
-GAME_URL="https://www.wanyiwan.top/game/xddq"
+HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
@@ -31,7 +32,15 @@ with sync_playwright() as p:
     browser=p.chromium.launch(headless=True)
     context=browser.new_context(storage_state=AUTH,viewport={"width":1280,"height":960})
     page=context.new_page()
-    page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+    page.goto(HOME_URL,wait_until="domcontentloaded",timeout=60000)
+    time.sleep(8)
+
+    launched=recorder.enter_xddq_from_portal(page)
+    if not launched:
+        page.screenshot(path=str(OUT/"launch_failed.png"),full_page=True)
+        raise RuntimeError("已登录首页，但未能从大厅启动寻道大千")
+    page=launched
+    time.sleep(12)
 
     events=[]
     clicked_dongfu=False
