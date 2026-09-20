@@ -58,6 +58,8 @@ with sync_playwright() as p:
     next_debug = 0
     opened = False
     events = []
+    dongfu_clicked_at = None
+    dongfu_clicks = 0
 
     while time.time() - started < 240:
         img = snap(page)
@@ -84,13 +86,36 @@ with sync_playwright() as p:
 
         ok, score, point = click_match(page, img, "dongfu")
         if ok:
-            events.append({"t": elapsed, "action": "dongfu", "score": score, "point": point})
-            time.sleep(8)
-            page.screenshot(path=str(OUT / "dongfu_opened.png"), full_page=True)
-            time.sleep(8)
-            page.screenshot(path=str(OUT / "dongfu_opened_16s.png"), full_page=True)
-            opened = True
-            break
+            # 活动弹窗可能恰好在这一帧之后出现，所以点完不立即判成功。
+            # 若后续仍看到洞府，说明点击被弹窗截走，再点一次即可。
+            if dongfu_clicked_at is None or time.time() - dongfu_clicked_at >= 5:
+                events.append({"t": elapsed, "action": "dongfu", "score": score, "point": point})
+                dongfu_clicks += 1
+                page.mouse.click(*point)
+                dongfu_clicked_at = time.time()
+                time.sleep(4)
+            else:
+                time.sleep(1)
+            continue
+
+        # 已经点过洞府，并且此刻没有任何已知弹窗、网络提示，也看不到主界面洞府按钮，
+        # 连续等几秒后才认定页面真的切进去了。
+        if dongfu_clicked_at is not None and time.time() - dongfu_clicked_at >= 5:
+            time.sleep(3)
+            check = snap(page)
+            blocked = False
+            for check_name in ("notice_x", "event_x", "continue", "dongfu"):
+                templ, threshold = TEMPLATES[check_name]
+                s, _ = match(check, templ)
+                if s >= threshold:
+                    blocked = True
+                    break
+            if not blocked:
+                page.screenshot(path=str(OUT / "dongfu_opened.png"), full_page=True)
+                time.sleep(8)
+                page.screenshot(path=str(OUT / "dongfu_opened_8s.png"), full_page=True)
+                opened = True
+                break
 
         time.sleep(2)
 
@@ -100,7 +125,11 @@ with sync_playwright() as p:
     )
     (OUT / "result.json").write_text(
         json.dumps(
-            {"dongfu_opened": opened, "elapsed": int(time.time() - started)},
+            {
+                "dongfu_opened": opened,
+                "dongfu_clicks": dongfu_clicks,
+                "elapsed": int(time.time() - started),
+            },
             ensure_ascii=False,
             indent=2,
         ),
