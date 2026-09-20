@@ -88,4 +88,12 @@ with sync_playwright() as p:
     time.sleep(25)
     shot(page, "main_ready")
 
+    # “鬼修来袭”弹窗无明显关闭按钮。只点击弹窗外左上角暗色背景，
+    # 不碰“前往重修”等会改变玩法状态的按钮。
+    box = game_box(page)
+    if box:
+        page.mouse.click(box["x"] + box["width"] * 0.03, box["y"] + box["height"] * 0.05)
+        time.sleep(4)
+    shot(page, "after_ghost_backdrop")
+
     browser.close()
