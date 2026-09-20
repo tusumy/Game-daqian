@@ -444,3 +444,5 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+# QR_REFRESH_TRIGGER
