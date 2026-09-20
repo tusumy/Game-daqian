@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.10'
       - run: |
-          pip install playwright opencv-python-headless
+          pip install playwright opencv-python-headless numpy opencv-python-headless
           playwright install --with-deps chromium
       - name: Restore #20 login
         env:
