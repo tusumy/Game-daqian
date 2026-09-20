@@ -159,6 +159,16 @@ def qr_locator(page):
     return None
 
 
+def pc_web_auth_ready(page):
+    try:
+        return bool(page.evaluate("""() =>
+          !!localStorage.getItem('x-game-token-pcweb') &&
+          !!localStorage.getItem('x-game-uid-pcweb')
+        """))
+    except Exception:
+        return False
+
+
 def real_game_ready(page):
     if recorder.frames:
         return True
@@ -353,6 +363,9 @@ def run():
                     deadline = time.time() + SCAN_TIMEOUT
                     left_qr_since = None
                     while time.time() < deadline:
+                        if pc_web_auth_ready(page):
+                            print("[+] 已检测到 pcweb 登录凭据写入 localStorage")
+                            break
                         if real_game_ready(page):
                             break
 
@@ -373,6 +386,23 @@ def run():
             elif not real_game_ready(page):
                 recorder.save_page_diagnostics(page, "login_state_unknown")
                 raise RuntimeError("既没有出现支付宝扫码页，也没有检测到真实游戏连接")
+
+            if pc_web_auth_ready(page) and not real_game_ready(page):
+                print("[+] 支付宝 PC 登录已成功，保存登录态并主动返回游戏页")
+                context.storage_state(path=str(QR_OUT / "storage_state.json"))
+                recorder.set_marker("pc_auth_redirect_game")
+                page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
+
+                game_deadline = time.time() + 90
+                while time.time() < game_deadline:
+                    snapshot_state(page, "wait_game_after_pc_auth")
+                    if real_game_ready(page):
+                        break
+                    time.sleep(1)
+
+                if not real_game_ready(page):
+                    recorder.save_page_diagnostics(page, "pc_auth_game_not_ready")
+                    raise RuntimeError("PC 登录凭据已拿到，但返回游戏页后未建立游戏连接")
 
             snapshot_state(page, "login_success_detected")
             recorder.set_marker("login_success")
