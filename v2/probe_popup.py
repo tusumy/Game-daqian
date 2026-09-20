@@ -28,6 +28,21 @@ def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
 
+def enter_game_point(img):
+    # “踏入仙途”只出现在启动画面的下部中间。
+    h,w=img.shape[:2]
+    if h < 850 or w < 800:
+        return None
+    x0,y0,x1,y1=360,740,600,830
+    roi=img[y0:y1,x0:x1]
+    hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
+    green=cv2.inRange(hsv,np.array([35,35,150]),np.array([100,255,255]))
+    white=cv2.inRange(hsv,np.array([0,0,190]),np.array([180,80,255]))
+    score=int(cv2.countNonZero(green))+int(cv2.countNonZero(white))
+    if score < 2200:
+        return None
+    return (480.0,790.0)
+
 def connection_confirm_point(img):
     # “连接失败，返回登陆界面”的橙黄色“确定”按钮。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
@@ -129,6 +144,17 @@ with sync_playwright() as p:
                 events.append({"t":round(now,2),"action":"privacy_agree","x":round(p[0],1),"y":round(p[1],1)})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
+
+        # 启动画面出现“踏入仙途”时进入游戏。
+        if not action and not last_click.get("enter_game"):
+            ep=enter_game_point(img)
+            if ep:
+                page.mouse.click(ep[0],ep[1])
+                last_click["enter_game"]=now
+                action="enter_game"
+                events.append({"t":round(now,2),"action":"enter_game","x":ep[0],"y":ep[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(12)
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:
