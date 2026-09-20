@@ -342,25 +342,51 @@ def capture_portal_login_qr(page):
 
     visible.click(timeout=8000, force=True)
 
-    deadline = time.time() + 45
+    # 点击后会导航到 /login。此时首页的“立即登录”当然消失，
+    # 不能把它误判成已登录；只认登录页实际生成出来的二维码。
+    deadline = time.time() + 60
     while time.time() < deadline:
-        if not portal_login_required(page):
-            print("[+] 首页点击登录后直接进入已登录态")
-            return None
         qr = qr_locator(page)
         if qr is not None:
+            print(f"[+] 登录页二维码已出现，当前 URL: {page.url}")
             return qr
         snapshot_state(page, "wait_portal_qr")
         time.sleep(1)
-    raise RuntimeError("点击首页“立即登录”后 45 秒内没有出现支付宝二维码")
+    recorder.save_page_diagnostics(page, "portal_qr_missing")
+    raise RuntimeError("点击首页“立即登录”后 60 秒内没有出现支付宝二维码")
 
 
 def wait_portal_login_success(page):
     deadline = time.time() + SCAN_TIMEOUT
+    pc_auth_seen_at = None
+
     while time.time() < deadline:
-        if not portal_login_required(page):
-            print("[+] 首页账号区已切换为登录态")
-            return True
+        # 完整成功必须回到游戏中心首页，并且右侧账号区不再要求登录。
+        if "/home" in page.url:
+            try:
+                if wait_portal_ready(page, 8) and not portal_login_required(page):
+                    print("[+] 扫码后已回到首页，账号区确认登录成功")
+                    return True
+            except Exception:
+                pass
+
+        # pcweb token 只代表扫码认证通过，不再把它当完整首页登录。
+        if pc_web_auth_ready(page):
+            if pc_auth_seen_at is None:
+                pc_auth_seen_at = time.time()
+                print("[+] 已收到 pcweb 扫码认证结果，继续等待网站完成回首页登录")
+
+            # 给前端足够时间自行跳转；若一直停在 /login，再回首页验证一次。
+            if time.time() - pc_auth_seen_at >= 12 and "/login" in page.url:
+                print("[*] 扫码认证已完成但登录页未自动返回，主动回首页验证最终账号态")
+                page.goto(PORTAL_URL, wait_until="domcontentloaded", timeout=60000)
+                time.sleep(4)
+                if wait_portal_ready(page, 20) and not portal_login_required(page):
+                    print("[+] 回首页后账号区确认登录成功")
+                    return True
+                # 若仍匿名，继续等待而不是误报成功。
+                print("[-] 回首页后仍是匿名态，继续等待登录流程")
+
         snapshot_state(page, "wait_portal_login")
         time.sleep(1)
     return False
