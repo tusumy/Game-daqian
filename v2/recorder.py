@@ -197,7 +197,19 @@ def save_page_diagnostics(page, name):
 
 def has_canvas(page):
     try:
-        return bool(page.locator("canvas").count())
+        text = page.locator("body").inner_text(timeout=1000)
+        if "支付宝扫码即玩" in text or "使用支付宝扫码即玩" in text:
+            return False
+    except Exception:
+        pass
+
+    try:
+        canvases = page.locator("canvas")
+        for i in range(canvases.count()):
+            box = canvases.nth(i).bounding_box()
+            if box and box["width"] >= 300 and box["height"] >= 300:
+                return True
+        return False
     except Exception:
         return False
 
@@ -243,6 +255,33 @@ def enter_xddq_from_portal(page):
         except Exception as exc:
             print(f"[-] 入口 {selector} 点击失败: {exc}")
 
+    # 当前玩一玩首页是游戏排行页；2026-09-20 用户确认寻道大千排第 4。
+    # 只有显式名称/链接都找不到时，才用“第 4 个可见游戏卡片”兜底。
+    try:
+        cards = page.locator('a[href*="/game/"]:visible')
+        unique = []
+        seen = set()
+        for i in range(cards.count()):
+            card = cards.nth(i)
+            href = card.get_attribute("href") or ""
+            if not href or href in seen:
+                continue
+            seen.add(href)
+            unique.append(card)
+        if len(unique) >= 4:
+            print("[+] 大厅按当前排行兜底：点击第 4 个游戏卡片")
+            unique[3].click(timeout=5000)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            time.sleep(8)
+            print(f"[PAGE] 排行第 4 入口后 url={page.url}")
+            if has_canvas(page):
+                return True
+    except Exception as exc:
+        print(f"[-] 排行第 4 入口点击失败: {exc}")
+
     direct_url = "https://www.wanyiwan.top/game/xddq"
     print(f"[*] 大厅未找到可点击入口，直接访问 {direct_url}")
     page.goto(direct_url, wait_until="domcontentloaded", timeout=60000)
@@ -252,6 +291,49 @@ def enter_xddq_from_portal(page):
         return True
 
     save_page_diagnostics(page, "portal_stuck")
+    return False
+
+
+def plant_any_available_seed(page, cell="unknown"):
+    """在当前种子面板里种任意可用种子。
+
+    优先兼容旧青石斛模板；若种子列表已更新，则以搜索框为锚点，
+    从列表第一项开始尝试。只要点击后出现新的上行 WS 帧，或种子面板关闭，
+    就视为已触发一次种植。
+    """
+    if find_image_center(page, "qingshihu_seed.png", 0.80):
+        set_marker(f"seed_any_legacy:{cell}")
+        if click_image(page, "qingshihu_seed.png", 0.80):
+            time.sleep(1.8)
+            return True
+
+    search = find_image_center(page, "search_bar.png", 0.70)
+    if not search:
+        print(f"[-] {cell}: 未识别到种子列表")
+        return False
+
+    sx, sy = search
+    # 新版种子多时不再搜索固定名称；从列表顶部往下尝试可见种子卡。
+    candidates = [
+        (sx, sy + 70),
+        (sx, sy + 115),
+        (sx, sy + 160),
+        (sx, sy + 205),
+    ]
+
+    for idx, (x, y) in enumerate(candidates, start=1):
+        sent_before = sum(1 for f in frames if f.get("direction") == "sent")
+        set_marker(f"seed_any_candidate:{cell}:{idx}")
+        page.mouse.click(x, y)
+        time.sleep(1.5)
+        sent_after = sum(1 for f in frames if f.get("direction") == "sent")
+
+        panel_still_open = find_image_center(page, "search_bar.png", 0.70) is not None
+        if sent_after > sent_before or not panel_still_open:
+            print(f"[+] {cell}: 已尝试种植当前可用种子，第 {idx} 项")
+            return True
+
+    print(f"[-] {cell}: 可见种子候选均未触发种植")
     return False
 
 
@@ -441,17 +523,8 @@ def run():
                             time.sleep(1.6)
 
                         if find_image_center(page, "search_bar.png", 0.75):
-                            set_marker(f"search_open:{cell}")
-                            click_image(page, "search_bar.png", 0.75)
-                            time.sleep(0.8)
-                            page.keyboard.press("Control+A")
-                            page.keyboard.type("青石斛")
-                            time.sleep(1.2)
-
-                            if find_image_center(page, "qingshihu_seed.png", 0.80):
-                                set_marker(f"seed_qingshihu:{cell}")
-                                click_image(page, "qingshihu_seed.png", 0.80)
-                                time.sleep(1.8)
+                            set_marker(f"seed_panel:{cell}")
+                            plant_any_available_seed(page, cell)
 
                         set_marker(f"close_panel:{cell}")
                         click_game(page, 200, 30)

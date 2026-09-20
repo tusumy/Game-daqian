@@ -279,17 +279,8 @@ def probe_farm(page):
                     time.sleep(1.5)
 
                 if recorder.find_image_center(page, "search_bar.png", 0.75):
-                    recorder.set_marker(f"search_open:{cell}")
-                    recorder.click_image(page, "search_bar.png", 0.75)
-                    time.sleep(0.8)
-                    page.keyboard.press("Control+A")
-                    page.keyboard.type("青石斛")
-                    time.sleep(1.2)
-
-                    if recorder.find_image_center(page, "qingshihu_seed.png", 0.80):
-                        recorder.set_marker(f"seed_qingshihu:{cell}")
-                        recorder.click_image(page, "qingshihu_seed.png", 0.80)
-                        time.sleep(1.8)
+                    recorder.set_marker(f"seed_panel:{cell}")
+                    recorder.plant_any_available_seed(page, cell)
 
                 recorder.set_marker(f"close_panel:{cell}")
                 recorder.click_game(page, 200, 30)
@@ -388,10 +379,15 @@ def run():
                 raise RuntimeError("既没有出现支付宝扫码页，也没有检测到真实游戏连接")
 
             if pc_web_auth_ready(page) and not real_game_ready(page):
-                print("[+] 支付宝 PC 登录已成功，保存登录态并主动返回游戏页")
+                print("[+] 支付宝 PC 登录已成功，保存登录态并从玩一玩首页进入游戏")
                 context.storage_state(path=str(QR_OUT / "storage_state.json"))
-                recorder.set_marker("pc_auth_redirect_game")
-                page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
+                recorder.set_marker("pc_auth_open_portal")
+                page.goto("https://www.wanyiwan.top/", wait_until="domcontentloaded", timeout=60000)
+                time.sleep(4)
+                recorder.save_page_diagnostics(page, "portal_after_pc_auth")
+
+                if not recorder.enter_xddq_from_portal(page):
+                    raise RuntimeError("PC 登录成功，但从玩一玩首页未能进入寻道大千")
 
                 game_deadline = time.time() + 90
                 while time.time() < game_deadline:
