@@ -1,11 +1,6 @@
 name: V2 协议侦察
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'v2/**'
-      - '.github/workflows/v2-capture.yml'
   workflow_dispatch:
 
 permissions:
