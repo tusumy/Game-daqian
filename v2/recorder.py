@@ -78,14 +78,50 @@ def screenshot_image(page):
 
 
 def game_rect(page):
-    return page.evaluate(
-        """(() => {
-            const c = document.querySelector('canvas');
-            if (!c) return null;
-            const r = c.getBoundingClientRect();
-            return {left:r.left, top:r.top, width:r.width, height:r.height};
-        })()"""
-    )
+    # 游戏实际运行在 game-iframe 中。优先从子 frame 的大 canvas 取页面坐标；
+    # Playwright 的 bounding_box() 对 frame 内元素返回相对主页面 viewport 的坐标。
+    try:
+        best = None
+        for frame in page.frames:
+            try:
+                canvases = frame.locator("canvas")
+                for i in range(canvases.count()):
+                    box = canvases.nth(i).bounding_box()
+                    if not box:
+                        continue
+                    if box["width"] < 200 or box["height"] < 300:
+                        continue
+                    area = box["width"] * box["height"]
+                    if best is None or area > best[0]:
+                        best = (area, box)
+            except Exception:
+                pass
+        if best:
+            box = best[1]
+            return {
+                "left": box["x"],
+                "top": box["y"],
+                "width": box["width"],
+                "height": box["height"],
+            }
+    except Exception:
+        pass
+
+    # 兜底：直接使用 iframe 本身的矩形。
+    try:
+        iframe = page.locator("#game-iframe")
+        if iframe.count() > 0:
+            box = iframe.first.bounding_box()
+            if box:
+                return {
+                    "left": box["x"],
+                    "top": box["y"],
+                    "width": box["width"],
+                    "height": box["height"],
+                }
+    except Exception:
+        pass
+    return None
 
 
 def game_to_page(page, x, y):

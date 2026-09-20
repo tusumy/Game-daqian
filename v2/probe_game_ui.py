@@ -63,15 +63,16 @@ with sync_playwright() as p:
         time.sleep(3)
     shot(page, "after_backdrop")
 
-    # 等主游戏真正加载完成，观察是否出现第二层活动弹窗。
-    time.sleep(35)
-    shot(page, "after_load")
+    # 多等一会儿，把主界面完整加载出来；每 20 秒留一张图便于判断加载进度。
+    for sec in (20, 40, 60, 90, 120):
+        time.sleep(20 if sec < 120 else 30)
+        shot(page, f"load_{sec}s")
 
     box = game_box(page)
     if box:
-        # 再点一次相同的左侧遮罩区，测试活动弹窗是否也可关闭。
+        # 若加载完成后仍有活动弹窗，再用已验证安全的左侧遮罩点击关闭。
         page.mouse.click(box["x"] + box["width"] * 0.03, box["y"] + box["height"] * 0.50)
         time.sleep(4)
-    shot(page, "after_second_backdrop")
+    shot(page, "after_final_backdrop")
 
     browser.close()
