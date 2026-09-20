@@ -404,6 +404,81 @@ def _click_confirm_login(page):
     return False
 
 
+def _remove_named_devices_and_login(page, names=("Chrome",)):
+    """
+    仅移除用户明确授权的设备名称。
+    当前授权：移除所有 Chrome，保留 Edge。
+    """
+    selected = 0
+
+    # 每一行设备卡里都有设备名 + checkbox。只在包含指定设备名的行里勾选。
+    for name in names:
+        try:
+            rows = page.locator("div").filter(has_text=name)
+            seen = set()
+            for i in range(rows.count()):
+                row = rows.nth(i)
+                try:
+                    text = row.inner_text(timeout=1000).strip()
+                except Exception:
+                    continue
+                # 过滤祖先大容器，只保留短文本的设备行。
+                if not text.startswith(name) or len(text) > 120 or text in seen:
+                    continue
+                seen.add(text)
+                cb = row.locator('input[type="checkbox"]')
+                if cb.count() == 0:
+                    # 某些 UI checkbox 由 label/span 包装。
+                    cb = row.locator('[role="checkbox"]')
+                if cb.count() > 0:
+                    try:
+                        if not cb.first.is_checked():
+                            cb.first.check(force=True)
+                    except Exception:
+                        cb.first.click(force=True)
+                    selected += 1
+        except Exception:
+            pass
+
+    # 兜底：按包含 Chrome 的设备行点击其左侧复选框区域。
+    if selected == 0:
+        try:
+            labels = page.get_by_text("Chrome", exact=True)
+            for i in range(labels.count()):
+                label = labels.nth(i)
+                if not label.is_visible():
+                    continue
+                row = label.locator("xpath=ancestor::*[.//input[@type='checkbox']][1]")
+                if row.count() > 0:
+                    cb = row.locator('input[type="checkbox"]').first
+                    try:
+                        if not cb.is_checked():
+                            cb.check(force=True)
+                    except Exception:
+                        cb.click(force=True)
+                    selected += 1
+        except Exception:
+            pass
+
+    print(f"[+] 已按授权选择 {selected} 台 Chrome 设备准备移除")
+
+    if selected < 2:
+        recorder.save_page_diagnostics(page, "device_select_failed")
+        return False
+
+    # 明确只点“确认移除并登录”，不会碰其它设备。
+    btn = page.get_by_text("确认移除并登录", exact=True)
+    for i in range(btn.count()):
+        item = btn.nth(i)
+        if item.is_visible():
+            item.click(timeout=8000, force=True)
+            print("[+] 已点击“确认移除并登录”，等待前端继续进入游戏")
+            return True
+
+    recorder.save_page_diagnostics(page, "device_confirm_button_missing")
+    return False
+
+
 def wait_login_frontend_finish(page, timeout=150):
     deadline = time.time() + timeout
     auth_seen = False
@@ -427,9 +502,13 @@ def wait_login_frontend_finish(page, timeout=150):
         # 达到 3 台设备上限时必须由用户决定移除哪一台；绝不自动删除。
         if _visible_text(page, "登录设备数量已达上限"):
             recorder.save_page_diagnostics(page, "device_limit")
+            # 用户已明确授权：删除两台 Chrome，保留 Edge。
+            if _remove_named_devices_and_login(page, names=("Chrome",)):
+                time.sleep(3)
+                continue
             write_status({
                 "state": "device_limit",
-                "message": "登录设备数量已达上限，需要用户选择旧设备移除",
+                "message": "已到设备上限，但自动选择两台 Chrome 失败",
                 "url": url,
             })
             return "device_limit"
