@@ -38,7 +38,7 @@ jobs:
           GAME_URL: ${{ secrets.GAME_URL }}
           GAME_COOKIES_JSON: ${{ secrets.GAME_COOKIES_JSON }}
           GAME_AUTH_JSON: ${{ secrets.GAME_AUTH_JSON }}
-          QR_SCAN_TIMEOUT: '900'
+          QR_SCAN_TIMEOUT: '600'
           PYTHONUNBUFFERED: '1'
         run: |
           rm -rf v2/qr

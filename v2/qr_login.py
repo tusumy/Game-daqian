@@ -2,6 +2,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -13,6 +14,115 @@ QR_OUT.mkdir(parents=True, exist_ok=True)
 
 GAME_URL = os.getenv("GAME_URL") or "https://www.wanyiwan.top/game/xddq"
 SCAN_TIMEOUT = int(os.getenv("QR_SCAN_TIMEOUT", "900"))
+
+
+NETWORK_LOG = QR_OUT / "network.jsonl"
+STATE_LOG = QR_OUT / "state_trace.jsonl"
+
+
+def append_jsonl(path, data):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False) + "\n")
+
+
+def sanitize_url(url):
+    try:
+        parts = urlsplit(url)
+        keys = sorted({k for k, _ in parse_qsl(parts.query, keep_blank_values=True)})
+        query = "&".join(f"{k}=<redacted>" for k in keys)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+    except Exception:
+        return url.split("?", 1)[0]
+
+
+def data_shape(value, depth=0):
+    if depth >= 3:
+        return type(value).__name__
+    if isinstance(value, dict):
+        return {str(k): data_shape(v, depth + 1) for k, v in list(value.items())[:40]}
+    if isinstance(value, list):
+        return [data_shape(value[0], depth + 1)] if value else []
+    return type(value).__name__
+
+
+def request_shape(post_data):
+    if not post_data:
+        return None
+    try:
+        return {"json": data_shape(json.loads(post_data))}
+    except Exception:
+        try:
+            return {"form_keys": sorted({k for k, _ in parse_qsl(post_data, keep_blank_values=True)})}
+        except Exception:
+            return {"kind": "opaque", "length": len(post_data)}
+
+
+def hook_http(page):
+    def on_request(req):
+        try:
+            append_jsonl(NETWORK_LOG, {
+                "ts": time.time(),
+                "kind": "request",
+                "method": req.method,
+                "resource_type": req.resource_type,
+                "url": sanitize_url(req.url),
+                "post": request_shape(req.post_data),
+            })
+        except Exception:
+            pass
+
+    def on_response(resp):
+        try:
+            item = {
+                "ts": time.time(),
+                "kind": "response",
+                "status": resp.status,
+                "url": sanitize_url(resp.url),
+                "content_type": resp.headers.get("content-type", ""),
+            }
+            if "json" in item["content_type"].lower():
+                try:
+                    body = resp.json()
+                    item["json_shape"] = data_shape(body)
+                except Exception:
+                    pass
+            append_jsonl(NETWORK_LOG, item)
+        except Exception:
+            pass
+
+    page.on("request", on_request)
+    page.on("response", on_response)
+
+
+def snapshot_state(page, label):
+    try:
+        js = page.evaluate("""() => ({
+          href: location.href,
+          ternPresent: !!window.__TERN__,
+          clientUserPresent: !!(window.__TERN__ && window.__TERN__.user && window.__TERN__.user.clientUser),
+          clientUserKeys: (window.__TERN__ && window.__TERN__.user && window.__TERN__.user.clientUser)
+            ? Object.keys(window.__TERN__.user.clientUser).sort() : [],
+          localStorageKeys: Object.keys(localStorage).sort(),
+          sessionStorageKeys: Object.keys(sessionStorage).sort(),
+        })""")
+    except Exception as exc:
+        js = {"error": str(exc), "href": getattr(page, "url", "")}
+
+    try:
+        cookies = page.context.cookies()
+        cookie_names = sorted({f"{c.get('domain','')}|{c.get('name','')}" for c in cookies})
+    except Exception:
+        cookie_names = []
+
+    append_jsonl(STATE_LOG, {
+        "ts": time.time(),
+        "label": label,
+        "qr_present": qr_locator(page) is not None,
+        "qr_page": is_qr_page(page),
+        "frames": len(recorder.frames),
+        "cookies": cookie_names,
+        **js,
+    })
 
 
 def write_status(data):
@@ -195,16 +305,19 @@ def run():
         context = browser.new_context(**kwargs)
         page = context.new_page()
         page.on("websocket", recorder.hook_websocket)
+        hook_http(page)
 
         ok = False
         try:
             recorder.set_marker("open_login")
             page.goto(GAME_URL, wait_until="domcontentloaded", timeout=60000)
+            snapshot_state(page, "after_goto")
 
             deadline = time.time() + 90
             while time.time() < deadline:
                 if is_qr_page(page) or real_game_ready(page):
                     break
+                snapshot_state(page, "wait_initial")
                 time.sleep(1)
 
             if is_qr_page(page):
@@ -217,6 +330,7 @@ def run():
                         break
                     if real_game_ready(page):
                         break
+                    snapshot_state(page, "wait_qr_canvas")
                     time.sleep(1)
 
                 if real_game_ready(page):
@@ -234,6 +348,7 @@ def run():
                     })
                     (QR_OUT / "READY").write_text("scan qr.png with Alipay", encoding="utf-8")
                     print(f"[QR_READY] 二维码已生成，等待支付宝扫码，最多 {SCAN_TIMEOUT} 秒")
+                    snapshot_state(page, "qr_ready")
 
                     deadline = time.time() + SCAN_TIMEOUT
                     left_qr_since = None
@@ -251,6 +366,7 @@ def run():
                         else:
                             left_qr_since = None
 
+                        snapshot_state(page, "wait_after_scan")
                         time.sleep(1)
                     else:
                         raise RuntimeError("等待支付宝扫码超时")
@@ -258,6 +374,7 @@ def run():
                 recorder.save_page_diagnostics(page, "login_state_unknown")
                 raise RuntimeError("既没有出现支付宝扫码页，也没有检测到真实游戏连接")
 
+            snapshot_state(page, "login_success_detected")
             recorder.set_marker("login_success")
             write_status({"state": "logged_in", "url": page.url})
             page.screenshot(path=str(QR_OUT / "after_scan.png"), full_page=True)
