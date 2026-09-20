@@ -37,5 +37,11 @@ with sync_playwright() as p:
         clickr(page,b,0.50,0.81)   # “踏入仙途”
         time.sleep(35)
     page.screenshot(path=str(OUT/"main_after_enter.png"),full_page=True)
+
+    b=box(page)
+    if b:
+        clickr(page,b,0.86,0.20)   # 公告右上角 X
+        time.sleep(6)
+    page.screenshot(path=str(OUT/"main_clean.png"),full_page=True)
     context.storage_state(path=str(OUT/"storage_state_main.json"))
     browser.close()
