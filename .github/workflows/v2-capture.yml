@@ -34,6 +34,7 @@ jobs:
       - name: 抓当前游戏协议
         env:
           GAME_URL: ${{ secrets.GAME_URL }}
+          GAME_COOKIES_JSON: ${{ secrets.GAME_COOKIES_JSON }}
           GAME_AUTH_JSON: ${{ secrets.GAME_AUTH_JSON }}
           PYTHONUNBUFFERED: '1'
         run: python v2/recorder.py

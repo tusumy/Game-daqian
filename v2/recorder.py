@@ -184,32 +184,86 @@ def summarize():
         print(f"{name}: {dict(counts)}")
 
 
+def normalize_cookie_list(items):
+    cookies = []
+    for item in items:
+        cookie = {
+            "name": item["name"],
+            "value": item.get("value", ""),
+            "domain": item["domain"],
+            "path": item.get("path", "/"),
+            "httpOnly": bool(item.get("httpOnly", False)),
+            "secure": bool(item.get("secure", False)),
+        }
+
+        expires = item.get("expires", item.get("expirationDate"))
+        if expires is not None:
+            cookie["expires"] = float(expires)
+
+        same_site = item.get("sameSite")
+        if isinstance(same_site, str):
+            normalized = same_site.strip().lower()
+            mapping = {
+                "strict": "Strict",
+                "lax": "Lax",
+                "none": "None",
+                "no_restriction": "None",
+                "unspecified": None,
+            }
+            if normalized in mapping and mapping[normalized]:
+                cookie["sameSite"] = mapping[normalized]
+
+        cookies.append(cookie)
+
+    return {"cookies": cookies, "origins": []}
+
+
+def parse_auth_payload(raw, source_name):
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{source_name} 不是有效 JSON: {exc}") from exc
+
+    if isinstance(data, list):
+        print(f"[+] {source_name} 检测为浏览器 cookie 数组，自动转换")
+        return normalize_cookie_list(data)
+
+    if isinstance(data, dict) and isinstance(data.get("cookies"), list):
+        print(f"[+] {source_name} 检测为 Playwright storage_state")
+        return {
+            "cookies": normalize_cookie_list(data["cookies"])["cookies"],
+            "origins": data.get("origins", []),
+        }
+
+    raise RuntimeError(
+        f"{source_name} 格式不支持：需要浏览器 cookie 数组，"
+        "或包含 cookies/origins 的 Playwright storage_state。"
+    )
+
+
 def load_storage_state():
+    raw = (os.getenv("GAME_COOKIES_JSON") or "").strip()
+    if raw:
+        return parse_auth_payload(raw, "GAME_COOKIES_JSON")
+
     raw = (os.getenv("GAME_AUTH_JSON") or "").strip()
     if raw:
-        try:
-            state = json.loads(raw)
-            print("[+] 使用 GAME_AUTH_JSON 登录态")
-            return state
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"GAME_AUTH_JSON 不是有效 JSON: {exc}") from exc
+        return parse_auth_payload(raw, "GAME_AUTH_JSON")
 
     path = ROOT / "auth.json"
     if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            print("[+] 使用仓库 auth.json 登录态")
-            return state
-        except json.JSONDecodeError as exc:
+            raw = path.read_text(encoding="utf-8")
+            return parse_auth_payload(raw, "仓库 auth.json")
+        except RuntimeError as exc:
             raise RuntimeError(
-                "仓库 auth.json 已损坏或被截断，请重新导出完整登录态，"
-                "或把完整 JSON 放进 GitHub Secret: GAME_AUTH_JSON。"
+                "仓库 auth.json 不可用。不要把登录 cookie 提交进 git；"
+                "请改用 GitHub Secret: GAME_COOKIES_JSON。"
             ) from exc
 
     raise RuntimeError(
-        "没有可用登录态：请提供完整 auth.json，"
-        "或设置 GitHub Secret: GAME_AUTH_JSON。"
+        "没有可用登录态。推荐把浏览器导出的 cookie 数组"
+        "放进 GitHub Secret: GAME_COOKIES_JSON。"
     )
 
 
