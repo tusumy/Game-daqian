@@ -184,14 +184,45 @@ def summarize():
         print(f"{name}: {dict(counts)}")
 
 
+def load_storage_state():
+    raw = (os.getenv("GAME_AUTH_JSON") or "").strip()
+    if raw:
+        try:
+            state = json.loads(raw)
+            print("[+] 使用 GAME_AUTH_JSON 登录态")
+            return state
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"GAME_AUTH_JSON 不是有效 JSON: {exc}") from exc
+
+    path = ROOT / "auth.json"
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            print("[+] 使用仓库 auth.json 登录态")
+            return state
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "仓库 auth.json 已损坏或被截断，请重新导出完整登录态，"
+                "或把完整 JSON 放进 GitHub Secret: GAME_AUTH_JSON。"
+            ) from exc
+
+    raise RuntimeError(
+        "没有可用登录态：请提供完整 auth.json，"
+        "或设置 GitHub Secret: GAME_AUTH_JSON。"
+    )
+
+
 def run():
-    storage_state = str(ROOT / "auth.json") if (ROOT / "auth.json").exists() else None
+    storage_state = load_storage_state()
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        kwargs = {"viewport": VIEWPORT, "device_scale_factor": 1}
-        if storage_state:
-            kwargs["storage_state"] = storage_state
+        kwargs = {
+            "viewport": VIEWPORT,
+            "device_scale_factor": 1,
+            "storage_state": storage_state,
+        }
         context = browser.new_context(**kwargs)
         page = context.new_page()
         page.on("websocket", hook_websocket)
