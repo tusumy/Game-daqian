@@ -62,33 +62,37 @@ def enter_game_point(img):
     return (480.0,790.0)
 
 def network_continue_point(img):
-    # “网络状况不佳”弹窗：左侧橙色“重启” + 右侧绿色“继续”同时存在。
-    # 只有两种色块同时命中才点击绿色按钮，避免把其它绿色按钮当成“继续”。
+    # 网络提示的两个按钮位置/尺寸很固定：
+    # 左橙“重启”约 x=374,y=603；右绿“继续”约 x=575,y=603。
+    # 同时命中这两个矩形才确认弹窗存在，避免把加载页颜色误判成按钮。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=250,520,720,680
-    roi=hsv[y0:y1,x0:x1]
-    green=cv2.inRange(roi,np.array([35,45,70]),np.array([100,255,255]))
-    orange=cv2.inRange(roi,np.array([0,70,90]),np.array([30,255,255]))
 
-    def largest(mask):
+    def box_component(x0,y0,x1,y1,lo,hi):
+        roi=hsv[y0:y1,x0:x1]
+        mask=cv2.inRange(roi,np.array(lo),np.array(hi))
         n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
         best=None
         for i in range(1,n):
             x,y,w,h,area=stats[i]
-            if area < 1200 or w < 70 or h < 25:
+            if not (70 <= w <= 170 and 24 <= h <= 65 and area >= 1500):
                 continue
+            cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
             if best is None or area>best[0]:
-                best=(area,(float(cent[i][0]+x0),float(cent[i][1]+y0)))
+                best=(area,(cx,cy,w,h))
         return best
 
-    g=largest(green)
-    o=largest(orange)
-    if not g or not o:
+    orange=box_component(300,560,460,650,[0,70,90],[30,255,255])
+    green=box_component(500,560,650,650,[35,45,70],[100,255,255])
+    if not orange or not green:
         return None
-    # 绿色按钮应位于橙色按钮右侧。
-    if g[1][0] <= o[1][0]:
+
+    ox,oy,ow,oh=orange[1]
+    gx,gy,gw,gh=green[1]
+    if abs(oy-gy) > 18:
         return None
-    return g[1]
+    if not (345 <= ox <= 420 and 540 <= gx <= 610 and 580 <= gy <= 625):
+        return None
+    return (gx,gy)
 
 def connection_confirm_point(img):
     # “连接失败，返回登陆界面”的橙黄色“确定”按钮。
