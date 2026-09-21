@@ -22,17 +22,7 @@ def env_flag(name, default=False):
 
 
 def load_storage_state():
-    """优先读取上一轮持久化状态，再回退到 GitHub Secret / auth.json。"""
-    state_file = (os.getenv("GAME_AUTH_FILE") or "").strip()
-    if state_file and os.path.exists(state_file):
-        try:
-            with open(state_file, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            print(f"[+] 已从上一轮状态载入登录态：{state_file}")
-            return state
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"[-] 上一轮登录态读取失败：{exc}")
-
+    """优先读取 GitHub Secret；本地仍兼容仓库里的 auth.json。"""
     raw = (os.getenv("GAME_AUTH_JSON") or os.getenv("AUTH_JSON") or "").strip()
     if raw:
         try:
@@ -178,122 +168,6 @@ def drag_game(page, x1, y1, x2, y2, steps=30):
     page.mouse.up()
 
 
-def enter_danjie(page, timeout=180):
-    """稳定清理登录/活动弹窗并进入丹界药田。"""
-    deadline = time.time() + timeout
-    last_click = {}
-
-    while time.time() < deadline:
-        now = time.time()
-
-        # 个人信息保护提示：只点明确的“同意”模板。
-        if now - last_click.get("privacy", 0) > 5:
-            if find_and_click_image(
-                page, "v2/templates/privacy_agree.png", confidence=0.80
-            ):
-                print("[+] 已处理个人信息保护提示")
-                last_click["privacy"] = now
-                time.sleep(3)
-                continue
-
-        # 网络状况不佳：优先点绿色“继续”，避免误点背后界面。
-        if now - last_click.get("continue", 0) > 6:
-            if find_and_click_image(
-                page, "v2/templates/continue.png", confidence=0.80
-            ):
-                print("[+] 网络提示：继续")
-                last_click["continue"] = now
-                time.sleep(6)
-                continue
-
-        # 每日活动是固定分支：勾“今日不再提示”，再关右上角 X。
-        daily = find_image_center(
-            page, "v2/templates/daily_no_remind.png", confidence=0.78
-        )
-        if daily:
-            page.mouse.click(daily[0] - 42, daily[1])
-            time.sleep(0.8)
-            closed = find_and_click_image(
-                page, "v2/templates/event_x.png", confidence=0.82
-            )
-            if not closed:
-                # 当前游戏 canvas 约 480px 宽；右上角空白处仅作保守兜底。
-                click_game(page, 430, 120)
-            print("[+] 每日活动：已勾今日不再提示并关闭")
-            last_click["daily"] = now
-            time.sleep(3)
-            continue
-
-        # 仙官发玉不是必经流程：只有模板真的出现才处理。
-        officer = find_image_center(
-            page, "v2/templates/officer_no_remind.png", confidence=0.80
-        )
-        if officer:
-            page.mouse.click(officer[0] - 86, officer[1])
-            time.sleep(0.8)
-            # 点仙官层右侧空白收掉，不等待它出现，也不把它当固定步骤。
-            click_game(page, 460, 320)
-            print("[+] 仙官发玉：已勾本次登录不再提示并收起")
-            last_click["officer"] = now
-            time.sleep(3)
-            continue
-
-        # 公告/活动海报优先关闭。
-        closed = False
-        for path, desc in (
-            ("v2/templates/notice_x.png", "公告"),
-            ("v2/templates/event_x.png", "活动"),
-            ("close_notice.png", "旧公告"),
-        ):
-            if find_and_click_image(page, path, confidence=0.82):
-                print(f"[+] 已关闭{desc}")
-                time.sleep(3)
-                closed = True
-                break
-        if closed:
-            continue
-
-        # 启动画面：踏入仙途。兼容旧大模板和 v2 小模板。
-        entered = False
-        for path, confidence in (
-            ("enter_game_btn.png", 0.72),
-            ("v2/templates/enter_game_small.jpg", 0.75),
-        ):
-            if find_and_click_image(page, path, confidence=confidence):
-                print("[+] 已点击踏入仙途")
-                last_click["enter"] = now
-                time.sleep(10)
-                entered = True
-                break
-        if entered:
-            continue
-
-        # 已经在洞府时，丹界入口出现就直接进入。
-        if find_and_click_image(page, "danjie_btn.png", confidence=0.72):
-            print("[+] 已进入丹界药田")
-            time.sleep(5)
-            return True
-
-        # 主界面洞府入口：优先沿用正式任务模板，失败再尝试 v2 模板。
-        if now - last_click.get("dongfu", 0) > 6:
-            for path, confidence in (
-                ("dongfu_btn.png", 0.72),
-                ("v2/templates/dongfu.png", 0.75),
-            ):
-                if find_and_click_image(page, path, confidence=confidence):
-                    print("[+] 已点击洞府")
-                    last_click["dongfu"] = now
-                    time.sleep(6)
-                    break
-            else:
-                time.sleep(1.5)
-            continue
-
-        time.sleep(1.5)
-
-    return False
-
-
 def run():
     game_url = os.getenv("GAME_URL", DEFAULT_GAME_URL)
     headless = env_flag("HEADLESS", default=bool(os.getenv("CI")))
@@ -331,9 +205,25 @@ def run():
             else:
                 print("[-] 暂未检测到 canvas，将继续尝试页面坐标")
 
-            # 稳定启动：弹窗出现才处理，不再盲滑/盲点，也不等待可选仙官层。
-            if not enter_danjie(page, timeout=180):
-                raise RuntimeError("未能在限定时间内进入丹界药田")
+            # 第一步：右滑清场 + 关闭公告
+            drag_game(page, 750, 300, 150, 300)
+            time.sleep(3)
+            click_game(page, 100, 750)
+            time.sleep(1.5)
+            find_and_click_image(page, "close_notice.png", confidence=0.72)
+            time.sleep(2.5)
+
+            # 第二步：导航到丹界药田
+            auto_wait_and_click(
+                page, "enter_game_btn.png", timeout=12, desc="踏入仙途", confidence=0.72
+            )
+            auto_wait_and_click(
+                page, "dongfu_btn.png", timeout=15, desc="洞府", confidence=0.72
+            )
+            auto_wait_and_click(
+                page, "danjie_btn.png", timeout=15, desc="丹界药田", confidence=0.72
+            )
+            time.sleep(5)
 
             farm_blocks = [
                 {
@@ -429,11 +319,6 @@ def run():
                     pass
             raise
         finally:
-            try:
-                context.storage_state(path="farm_storage_state.json")
-                print("[+] 已保存本轮登录态：farm_storage_state.json")
-            except Exception as exc:
-                print(f"[-] 保存本轮登录态失败：{exc}")
             browser.close()
 
 
