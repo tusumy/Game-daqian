@@ -502,8 +502,23 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
-                    # 有些活动海报（例如“东海寻珍”）的 X 外观和旧模板不同，
-                    # 但位置稳定。识别到右上高亮 X 就先关掉，再继续验证洞府。
+                    # 一旦主界面锚点已经恢复，说明前置弹窗都清完了。
+                    # 必须优先重试“洞府”，绝不能再让通用 X 去扫描主界面上的亮点。
+                    still_main=main_dongfu_point(shot)
+                    if still_main:
+                        if time.time()-last_dongfu_retry >= 6:
+                            page.mouse.click(still_main[0],still_main[1])
+                            last_dongfu_retry=time.time()
+                            events.append({"t":round(time.time(),2),"action":"dongfu_retry",
+                                           "x":still_main[0],"y":still_main[1]})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(6)
+                        else:
+                            time.sleep(2)
+                        continue
+
+                    # 只有主界面锚点不存在时，才允许使用通用右上 X。
+                    # 这样可处理“东海寻珍”等无模板海报，同时避免把主页亮点误当关闭键。
                     mp=modal_close_point(shot)
                     if mp:
                         before_close=shot
@@ -528,20 +543,6 @@ with sync_playwright() as p:
                             page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
                             abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
                             break
-                        continue
-
-                    # 还看得到主界面锚点，说明弹窗清完但洞府并未真正打开，再点一次。
-                    still_main=main_dongfu_point(shot)
-                    if still_main:
-                        if time.time()-last_dongfu_retry >= 6:
-                            page.mouse.click(still_main[0],still_main[1])
-                            last_dongfu_retry=time.time()
-                            events.append({"t":round(time.time(),2),"action":"dongfu_retry",
-                                           "x":still_main[0],"y":still_main[1]})
-                            print("[VISION]",events[-1],flush=True)
-                            time.sleep(6)
-                        else:
-                            time.sleep(2)
                         continue
 
                     # 未看到主界面也未看到“丹界药田”时，只能说明有未知覆盖层/过渡画面。
