@@ -6,7 +6,7 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq24/storage_state.json"
+AUTH="/tmp/xddq25/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
@@ -168,7 +168,7 @@ with sync_playwright() as p:
 
     events=[]
     clicked_dongfu=False
-    deadline=time.time()+600
+    deadline=time.time()+1500
     last_click={}
 
     while time.time()<deadline and not clicked_dongfu:

@@ -16,7 +16,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,10 +29,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf /tmp/xddq24
-          mkdir -p /tmp/xddq24
-          gh run download 35556079387 -n xddq-popup-probe-24 -D /tmp/xddq24
-          test -f /tmp/xddq24/storage_state.json
+          rm -rf /tmp/xddq25
+          mkdir -p /tmp/xddq25
+          gh run download 35557024975 -n xddq-popup-probe-25 -D /tmp/xddq25
+          test -f /tmp/xddq25/storage_state.json
       - run: python v2/probe_popup.py
       - uses: actions/upload-artifact@v4
         if: always()
