@@ -275,6 +275,18 @@ def modal_close_point(img):
             best=(area,(cx,cy))
     return best[1] if best else None
 
+def probe_existing_plant(page, events):
+    # 丹界验证成功后只点一株现有灵植取证，不继续执行收取/选种/播种。
+    # 当前 1280x960 画布中，这个点落在药田中央的一株现有灵植上。
+    x,y=500.0,560.0
+    page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
+    page.mouse.click(x,y)
+    events.append({"t":round(time.time(),2),"action":"plant_probe_click","x":x,"y":y})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(4)
+    page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
+
+
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True)
     context=browser.new_context(storage_state=AUTH,viewport={"width":1280,"height":960})
@@ -396,9 +408,10 @@ with sync_playwright() as p:
                     abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
                 else:
                     page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
-                    clicked_dongfu=True
                     events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                     print("[VISION]",events[-1],flush=True)
+                    probe_existing_plant(page,events)
+                    clicked_dongfu=True
                 continue
 
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
@@ -481,9 +494,10 @@ with sync_playwright() as p:
                             abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
                         else:
                             page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
-                            clicked_dongfu=True
                             events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                             print("[VISION]",events[-1],flush=True)
+                            probe_existing_plant(page,events)
+                            clicked_dongfu=True
                         break
 
                     # 兼容旧 UI：若旧“丹界药田”模板仍能命中，也允许作为正向锚点。
