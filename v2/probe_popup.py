@@ -282,6 +282,29 @@ def scene_change_score(a,b):
     return float(np.mean(cv2.absdiff(ga,gb)))
 
 
+def promo_yellow_x_point(img):
+    # “高额返利/充值”类推广弹窗：关闭键是右上偏下的黄色 X，
+    # 位置约在页面 (675,300)，与普通活动海报的白色 X 不同。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=640,270,705,335
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    yellow=cv2.inRange(roi,np.array([18,90,120]),np.array([42,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(yellow)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area < 35 or w < 8 or h < 8:
+            continue
+        if not (660 <= cx <= 690 and 285 <= cy <= 315):
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
+
+
 def modal_close_point(img):
     # 洞府入口前的活动海报虽然样式会变，但右上关闭 X 基本固定在 x≈655,y≈230。
     # 只在这块很小的区域检测高亮 X，避免把活动海报遮住主界面误判成“已进洞府”。
@@ -455,6 +478,17 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
+        if not action:
+            yp=promo_yellow_x_point(img)
+            if yp:
+                page.mouse.click(yp[0],yp[1])
+                action="promo_yellow_x"
+                events.append({"t":round(now,2),"action":"promo_yellow_x",
+                               "x":round(yp[0],1),"y":round(yp[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(3)
+
         # 内层清弹窗窗口结束后，仍可能晚到一张新的活动海报（如“修罗战场”）。
         # 外层只在“当前不是主界面”时启用通用右上 X，避免把主页亮点误当关闭键。
         if not action and not main_dongfu_point(img):
@@ -614,6 +648,18 @@ with sync_playwright() as p:
                         events.append({"t":round(time.time(),2),"action":"dismiss_reward_overlay","x":690.0,"y":420.0})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
+                        continue
+
+                    # 充值推广类黄色 X。
+                    yp=promo_yellow_x_point(shot)
+                    if yp:
+                        page.mouse.click(yp[0],yp[1])
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_promo_yellow_x",
+                                       "x":round(yp[0],1),"y":round(yp[1],1)})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(3)
                         continue
 
                     # 各类活动海报优先处理；如果海报底部有“今日不再提示”，
