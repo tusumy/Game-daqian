@@ -454,6 +454,14 @@ with sync_playwright() as p:
 
         action=None
 
+        # 启动/主界面阶段也可能出现“恭喜获得”奖励层；看到就点空白处收掉。
+        if not action and reward_overlay_present(img):
+            page.mouse.click(690,420)
+            action="outer_reward_dismiss"
+            events.append({"t":round(now,2),"action":"outer_reward_dismiss","x":690.0,"y":420.0})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(4)
+
         # SDK 登录初始化失败：优先点绿色“重启”，再等待游戏重新拉起。
         if not action and now-last_click.get("sdk_restart",0) >= 12:
             sp=sdk_restart_point(img)
