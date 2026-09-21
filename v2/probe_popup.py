@@ -176,8 +176,9 @@ with sync_playwright() as p:
 
     events=[]
     clicked_dongfu=False
-    deadline=time.time()+1500
+    deadline=time.time()+420
     last_click={}
+    idle_since=time.time()
 
     while time.time()<deadline and not clicked_dongfu:
         img=screenshot_img(page)
@@ -234,17 +235,17 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
-        # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
-        if (not action and last_click.get("notice_closed_at")
-                and not last_click.get("enter_after_notice")
-                and now-last_click["notice_closed_at"] >= 3):
-            page.mouse.click(480,790)
-            last_click["enter_after_notice"]=now
-            action="enter_after_notice"
-            events.append({"t":round(now,2),"action":"enter_after_notice","x":480.0,"y":790.0})
-            print("[VISION]",events[-1],flush=True)
-            time.sleep(15)
+        # “踏入仙途”必须按当前画面判断，不能依赖“刚关闭过公告”。
+        # 登录态继承后公告可能根本不再出现；旧逻辑会因此永远卡在启动页。
+        if not action and now-last_click.get("enter_game",0) >= 8:
+            ep=enter_game_point(img)
+            if ep:
+                page.mouse.click(ep[0],ep[1])
+                last_click["enter_game"]=now
+                action="enter_game"
+                events.append({"t":round(now,2),"action":"enter_game","x":ep[0],"y":ep[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(15)
 
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
         if not action:
@@ -405,7 +406,15 @@ with sync_playwright() as p:
                   clicked_dongfu=True
               break
 
-        if not action:
+        if action:
+            idle_since=time.time()
+        else:
+            if time.time()-idle_since >= 120:
+                page.screenshot(path=str(OUT/"stalled_unknown.png"),full_page=True)
+                diag={name:round(info["score"],4) for name,info in matches.items()}
+                events.append({"t":round(time.time(),2),"action":"stalled_unknown","template_scores":diag})
+                print("[VISION]",events[-1],flush=True)
+                break
             time.sleep(2)
 
     page.screenshot(path=str(OUT/"after_vision.png"),full_page=True)
@@ -414,3 +423,6 @@ with sync_playwright() as p:
     (OUT/"vision_events.json").write_text(json.dumps(events,ensure_ascii=False,indent=2),encoding="utf-8")
     context.storage_state(path=str(OUT/"storage_state.json"))
     browser.close()
+
+    if not clicked_dongfu:
+        raise RuntimeError("V2 Probe 未验证进入洞府；已保存 stalled/after_vision 证据")
