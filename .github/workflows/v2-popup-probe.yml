@@ -29,10 +29,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf /tmp/xddq26
-          mkdir -p /tmp/xddq26
-          gh run download 35558578808 -n xddq-popup-probe-26 -D /tmp/xddq26
-          test -f /tmp/xddq26/storage_state.json
+          rm -rf /tmp/xddq27
+          mkdir -p /tmp/xddq27
+          gh run download 35559671483 -n xddq-auth-state-27 -D /tmp/xddq27
+          test -f /tmp/xddq27/storage_state.json
       - run: python v2/probe_popup.py
       - name: Preserve auth state
         if: always()

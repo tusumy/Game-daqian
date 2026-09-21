@@ -2,12 +2,12 @@ import time, json
 from pathlib import Path
 import cv2, numpy as np
 from playwright.sync_api import sync_playwright
-import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq26/storage_state.json"
+AUTH="/tmp/xddq27/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
+GAME_URL="https://www.wanyiwan.top/game/xddq"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
@@ -162,16 +162,13 @@ with sync_playwright() as p:
     page.goto(HOME_URL,wait_until="domcontentloaded",timeout=60000)
     time.sleep(8)
 
-    launched=recorder.enter_xddq_from_portal(page)
-    if launched:
-        page=launched
-    elif "/game/xddq" in page.url:
-        # 入口已经切到寻道页面，只是游戏 iframe / WebSocket 还没来得及建立。
-        # 这里继续等待，不能过早判失败。
-        print("[+] 已进入 /game/xddq，继续等待游戏本体加载",flush=True)
-    else:
+    # 大厅轮播偶尔会错误打开其它游戏（例如 sc33t）。
+    # 已有登录状态后不再赌轮播：先访问首页确认会话，再直达寻道大千固定 URL。
+    page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+    print(f"[PAGE] 直达寻道大千 url={page.url} title={page.title()!r}",flush=True)
+    if "/game/xddq" not in page.url:
         page.screenshot(path=str(OUT/"launch_failed.png"),full_page=True)
-        raise RuntimeError("已登录首页，但未能进入寻道大千页面")
+        raise RuntimeError(f"直达寻道大千失败，当前 url={page.url}")
     time.sleep(12)
 
     events=[]
@@ -212,16 +209,16 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
                 try:
+                    # 连接失败后直接回首页刷新会话，再直达寻道大千；
+                    # 不再调用可能卡住且会打开错误游戏的大厅轮播逻辑。
                     page.goto(HOME_URL,wait_until="domcontentloaded",timeout=60000)
-                    time.sleep(8)
-                    relaunched=recorder.enter_xddq_from_portal(page)
-                    if relaunched:
-                        page=relaunched
-                        time.sleep(12)
-                        events.append({"t":round(time.time(),2),"action":"relaunch_after_connection_failure"})
-                        print("[VISION]",events[-1],flush=True)
+                    time.sleep(4)
+                    page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+                    time.sleep(12)
+                    events.append({"t":round(time.time(),2),"action":"relaunch_direct_xddq","url":page.url})
+                    print("[VISION]",events[-1],flush=True)
                 except Exception as e:
-                    print("[!] 重连恢复失败:",repr(e),flush=True)
+                    print("[!] 直达重连恢复失败:",repr(e),flush=True)
 
         # 用户已明确授权个人信息保护提示。仅在检测到指定绿色按钮时点击一次。
         if not last_click.get("privacy_agree"):
