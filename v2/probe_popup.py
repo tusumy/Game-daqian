@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq27/storage_state.json"
+AUTH="/tmp/xddq28/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 GAME_URL="https://www.wanyiwan.top/game/xddq"
 TEMPLATES={
@@ -27,12 +27,13 @@ def screenshot_img(page):
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
 
 def reward_overlay_present(img):
-    # 洞府首次进入后可能弹“恭喜获得”奖励层。
-    # 识别中央金色横幅 + 下方亮色奖励卡，命中后仅点右侧暗背景关闭。
+    # 真正的“恭喜获得”奖励层在游戏区域中部有一整块宽大的棕金色横板。
+    # 活动海报（造化灵植/鬼修来袭等）虽然也有金色字，但不会有这块大棕板。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    gold=cv2.inRange(hsv[300:390,330:650],np.array([5,45,80]),np.array([40,255,255]))
-    bright=cv2.inRange(hsv[390:520,410:540],np.array([25,25,80]),np.array([110,255,255]))
-    return cv2.countNonZero(gold) > 2500 and cv2.countNonZero(bright) > 800
+    roi=hsv[350:530,228:710]
+    brown=cv2.inRange(roi,np.array([5,40,40]),np.array([35,220,210]))
+    frac=cv2.countNonZero(brown)/float(roi.shape[0]*roi.shape[1])
+    return frac > 0.60
 
 def profile_overlay_present(img):
     # 点洞府后偶发“北斗星君 / 仙王后期 / 本次登录不再提示”覆盖层。
@@ -244,6 +245,8 @@ with sync_playwright() as p:
             time.sleep(15)
 
         # 真正进入主界面后，点击底部“洞府”。
+        # 点下去之后不立刻判成功：先连续清掉活动/奖励/资料覆盖层，
+        # 直到主界面的金色圆盘锚点消失，才说明页面真的离开主界面。
         if not action:
             dp=main_dongfu_point(img)
             if dp:
@@ -253,30 +256,70 @@ with sync_playwright() as p:
                 events.append({"t":round(now,2),"action":"dongfu_main","x":dp[0],"y":dp[1]})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
-
-                # 首次点洞府后若出现“北斗星君”覆盖层，按用户提示点旁边暗处关闭，
-                # 然后再点一次洞府，拿真正的洞府页面。
-                img2=screenshot_img(page)
                 page.screenshot(path=str(OUT/"after_first_dongfu_click.png"),full_page=True)
-                if profile_overlay_present(img2):
-                    page.mouse.click(250,700)
-                    events.append({"t":round(time.time(),2),"action":"dismiss_profile_overlay","x":250.0,"y":700.0})
-                    print("[VISION]",events[-1],flush=True)
-                    time.sleep(4)
-                    page.mouse.click(dp[0],dp[1])
-                    events.append({"t":round(time.time(),2),"action":"dongfu_retry","x":dp[0],"y":dp[1]})
-                    print("[VISION]",events[-1],flush=True)
-                    time.sleep(8)
 
-                # 洞府进入后若弹“恭喜获得”奖励层，点击右侧暗背景关闭。
-                img3=screenshot_img(page)
-                page.screenshot(path=str(OUT/"after_dongfu_before_reward_close.png"),full_page=True)
-                if reward_overlay_present(img3):
-                    page.mouse.click(690,420)
-                    events.append({"t":round(time.time(),2),"action":"dismiss_reward_overlay","x":690.0,"y":420.0})
+                cleanup_deadline=time.time()+120
+                last_dongfu_retry=time.time()
+                clear_count=0
+                while time.time()<cleanup_deadline:
+                    shot=screenshot_img(page)
+
+                    # 资料提示层：点旁边暗处。
+                    if profile_overlay_present(shot):
+                        page.mouse.click(250,700)
+                        clear_count+=1
+                        events.append({"t":round(time.time(),2),"action":"dismiss_profile_overlay","x":250.0,"y":700.0})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(4)
+                        continue
+
+                    # 真正的“恭喜获得”奖励层：点空白处关闭。
+                    if reward_overlay_present(shot):
+                        page.screenshot(path=str(OUT/"after_dongfu_before_reward_close.png"),full_page=True)
+                        page.mouse.click(690,420)
+                        clear_count+=1
+                        events.append({"t":round(time.time(),2),"action":"dismiss_reward_overlay","x":690.0,"y":420.0})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(4)
+                        continue
+
+                    # 各类活动海报统一优先点右上 X。
+                    closed=False
+                    for pname in ("event_x","notice_x"):
+                        ppath,thr=TEMPLATES[pname]
+                        mm=best_match(shot,ppath)
+                        if mm and mm[0] >= thr:
+                            page.mouse.click(mm[1][0],mm[1][1])
+                            clear_count+=1
+                            events.append({"t":round(time.time(),2),"action":"post_dongfu_"+pname,
+                                           "score":round(float(mm[0]),4),
+                                           "x":round(float(mm[1][0]),1),"y":round(float(mm[1][1]),1)})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(4)
+                            closed=True
+                            break
+                    if closed:
+                        continue
+
+                    # 还看得到主界面锚点，说明弹窗清完但洞府并未真正打开，再点一次。
+                    still_main=main_dongfu_point(shot)
+                    if still_main:
+                        if time.time()-last_dongfu_retry >= 6:
+                            page.mouse.click(still_main[0],still_main[1])
+                            last_dongfu_retry=time.time()
+                            events.append({"t":round(time.time(),2),"action":"dongfu_retry",
+                                           "x":still_main[0],"y":still_main[1]})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(6)
+                        else:
+                            time.sleep(2)
+                        continue
+
+                    # 已无已知覆盖层，也不再是主界面：认为已真正进入洞府/洞府子页。
+                    events.append({"t":round(time.time(),2),"action":"dongfu_verified","cleared":clear_count})
                     print("[VISION]",events[-1],flush=True)
-                    time.sleep(6)
-                clicked_dongfu=True
+                    clicked_dongfu=True
+                    break
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:
