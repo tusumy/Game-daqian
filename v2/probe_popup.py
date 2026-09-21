@@ -365,6 +365,39 @@ with sync_playwright() as p:
             print("[VISION]",events[-1],flush=True)
             time.sleep(15)
 
+        # 如果洞府菜单已经打开，即使上一轮“清弹窗窗口”刚好超时，
+        # 也要在外层主循环立刻接住它并进入丹界，不能眼睁睁停在菜单上。
+        if not action and not danjie_entry_clicked:
+            menu=dongfu_menu_danjie_point(img)
+            if menu:
+                page.screenshot(path=str(OUT/"actual_dongfu_menu_outer.png"),full_page=True)
+                page.mouse.click(menu[0],menu[1])
+                danjie_entry_clicked=True
+                action="dongfu_menu_danjie_outer"
+                events.append({"t":round(now,2),"action":"dongfu_menu_danjie_outer",
+                               "x":menu[0],"y":menu[1],
+                               "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
+                print("[VISION]",events[-1],flush=True)
+
+                transition_deadline=time.time()+45
+                transitioned=False
+                while time.time()<transition_deadline:
+                    time.sleep(3)
+                    nxt=screenshot_img(page)
+                    if not dongfu_menu_danjie_point(nxt):
+                        time.sleep(4)
+                        page.screenshot(path=str(OUT/"after_danjie_transition.png"),full_page=True)
+                        events.append({"t":round(time.time(),2),"action":"danjie_transition_complete"})
+                        print("[VISION]",events[-1],flush=True)
+                        transitioned=True
+                        break
+                if not transitioned:
+                    page.screenshot(path=str(OUT/"after_danjie_click_loading.png"),full_page=True)
+                    abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
+                else:
+                    abort_reason="已进入丹界下一页；已保存真实页面等待识别药田"
+                continue
+
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
         if not action:
             di=matches.get("daily_no_remind")
