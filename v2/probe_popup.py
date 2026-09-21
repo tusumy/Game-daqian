@@ -1,3 +1,4 @@
+# explicit V2 probe rerun after maintenance
 import time, json
 from pathlib import Path
 import cv2, numpy as np
