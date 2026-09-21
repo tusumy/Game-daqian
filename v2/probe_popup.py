@@ -354,41 +354,47 @@ def modal_close_point(img):
     return best[1] if best else None
 
 def probe_existing_plant(page, events):
-    # 最小范围验证“普通收获 + 拖动批量”：
-    # 先正常收一株，再只拖过相邻两格；绝不点击会员“一键收获”。
-    # 上一轮 (451,526) 已经收成空地，因此这次从它相邻的成熟格开始。
-    x,y=467.0,537.0
-    page.screenshot(path=str(OUT/"before_harvest_drag_probe.png"),full_page=True)
+    # 二次验证“普通收获 + 拖动批量”：
+    # 选左侧三株仍成熟的地，避免上一轮中央已收空区域。
+    # 拖完后尝试收起选种面板，再截整片药田确认到底空了几格。
+    start=(403.0,537.0)
+    drag1=(419.0,548.0)
+    drag2=(435.0,559.0)
 
-    # 1) 点一株成熟作物，打开“特权 / 收获 / 一键收获”菜单。
-    page.mouse.click(x,y)
-    events.append({"t":round(time.time(),2),"action":"drag_probe_mature_click","x":x,"y":y})
+    page.screenshot(path=str(OUT/"before_harvest_drag_verify.png"),full_page=True)
+
+    # 1) 点成熟作物，打开“特权”菜单。
+    page.mouse.click(start[0],start[1])
+    events.append({"t":round(time.time(),2),"action":"drag_verify_mature_click",
+                   "x":start[0],"y":start[1]})
     print("[VISION]",events[-1],flush=True)
     time.sleep(2)
 
-    # 2) 只点左侧普通“收获”，先收这一株。
+    # 2) 点左侧普通“收获”，不碰会员“一键收获”。
     hx,hy=425.0,625.0
     page.mouse.click(hx,hy)
-    events.append({"t":round(time.time(),2),"action":"drag_probe_single_harvest","x":hx,"y":hy})
+    events.append({"t":round(time.time(),2),"action":"drag_verify_single_harvest",
+                   "x":hx,"y":hy})
     print("[VISION]",events[-1],flush=True)
-    time.sleep(1.2)
+    time.sleep(1.0)
 
-    # 3) 按住相邻成熟格，沿旧版药田网格只拖过两格。
-    #    网格相邻步长来自旧脚本：col += (16,11)。
-    p1=(483.0,548.0)
-    p2=(499.0,559.0)
-    page.mouse.move(p1[0],p1[1])
+    # 3) 从相邻成熟格开始按住，拖过两格。
+    page.mouse.move(drag1[0],drag1[1])
     page.mouse.down()
-    time.sleep(0.6)
-    page.mouse.move(p2[0],p2[1],steps=10)
+    time.sleep(0.4)
+    page.mouse.move(drag2[0],drag2[1],steps=12)
     time.sleep(0.8)
     page.mouse.up()
-    events.append({"t":round(time.time(),2),"action":"harvest_drag_probe",
-                   "from":[p1[0],p1[1]],"to":[p2[0],p2[1]]})
+    events.append({"t":round(time.time(),2),"action":"harvest_drag_verify",
+                   "from":[drag1[0],drag1[1]],"to":[drag2[0],drag2[1]]})
     print("[VISION]",events[-1],flush=True)
+    time.sleep(2)
 
-    time.sleep(4)
-    page.screenshot(path=str(OUT/"after_harvest_drag_probe.png"),full_page=True)
+    # 4) 如果因落点变成空地而弹出选种面板，点药田上方空白山景尝试收起。
+    page.screenshot(path=str(OUT/"after_harvest_drag_with_panel.png"),full_page=True)
+    page.mouse.click(690.0,430.0)
+    time.sleep(2)
+    page.screenshot(path=str(OUT/"after_harvest_drag_verify.png"),full_page=True)
 
 
 
