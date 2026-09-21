@@ -6,7 +6,7 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq22/storage_state.json"
+AUTH="/tmp/xddq23/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
@@ -95,19 +95,23 @@ def network_continue_point(img):
     return (gx,gy)
 
 def connection_confirm_point(img):
-    # “连接失败，返回登陆界面”的橙黄色“确定”按钮。
+    # “连接失败，返回登陆界面”的单独橙黄色“确定”按钮。
+    # 它的中心在页面更靠右的位置；网络提示左侧“重启”在 x≈394，不能混淆。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=350,560,600,700
+    x0,y0,x1,y1=450,560,620,680
     roi=hsv[y0:y1,x0:x1]
     mask=cv2.inRange(roi,np.array([5,80,100]),np.array([35,255,255]))
     n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
     best=None
     for i in range(1,n):
         x,y,w,h,area=stats[i]
-        if area < 1800 or w < 80 or h < 30:
+        if area < 1500 or not (75 <= w <= 160 and 25 <= h <= 65):
+            continue
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (480 <= cx <= 565 and 590 <= cy <= 645):
             continue
         if best is None or area>best[0]:
-            best=(area,(float(cent[i][0]+x0),float(cent[i][1]+y0)))
+            best=(area,(cx,cy))
     return best[1] if best else None
 
 def privacy_agree_point(img):
@@ -163,6 +167,17 @@ with sync_playwright() as p:
 
         action=None
 
+        # “网络状况不佳”优先处理；弹窗存在时绝不去点背后的公告叉。
+        if not action and now-last_click.get("network_continue",0) >= 8:
+            npnt=network_continue_point(img)
+            if npnt:
+                page.mouse.click(npnt[0],npnt[1])
+                last_click["network_continue"]=now
+                action="network_continue"
+                events.append({"t":round(now,2),"action":"network_continue","x":round(npnt[0],1),"y":round(npnt[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(8)
+
         # 连接失败提示可安全确认；确认后从已登录大厅重新启动一次。
         if not last_click.get("connection_confirm"):
             cp=connection_confirm_point(img)
@@ -184,17 +199,6 @@ with sync_playwright() as p:
                         print("[VISION]",events[-1],flush=True)
                 except Exception as e:
                     print("[!] 重连恢复失败:",repr(e),flush=True)
-
-        # “网络状况不佳”优先处理；弹窗存在时绝不去点背后的公告叉。
-        if not action and now-last_click.get("network_continue",0) >= 8:
-            npnt=network_continue_point(img)
-            if npnt:
-                page.mouse.click(npnt[0],npnt[1])
-                last_click["network_continue"]=now
-                action="network_continue"
-                events.append({"t":round(now,2),"action":"network_continue","x":round(npnt[0],1),"y":round(npnt[1],1)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(8)
 
         # 用户已明确授权个人信息保护提示。仅在检测到指定绿色按钮时点击一次。
         if not last_click.get("privacy_agree"):
