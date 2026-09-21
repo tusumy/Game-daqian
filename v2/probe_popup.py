@@ -395,7 +395,10 @@ with sync_playwright() as p:
                     page.screenshot(path=str(OUT/"after_danjie_click_loading.png"),full_page=True)
                     abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
                 else:
-                    abort_reason="已进入丹界下一页；已保存真实页面等待识别药田"
+                    page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
+                    clicked_dongfu=True
+                    events.append({"t":round(time.time(),2),"action":"danjie_verified"})
+                    print("[VISION]",events[-1],flush=True)
                 continue
 
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
@@ -477,7 +480,10 @@ with sync_playwright() as p:
                             page.screenshot(path=str(OUT/"after_danjie_click_loading.png"),full_page=True)
                             abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
                         else:
-                            abort_reason="已进入丹界下一页；已保存真实页面等待识别药田"
+                            page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
+                            clicked_dongfu=True
+                            events.append({"t":round(time.time(),2),"action":"danjie_verified"})
+                            print("[VISION]",events[-1],flush=True)
                         break
 
                     # 兼容旧 UI：若旧“丹界药田”模板仍能命中，也允许作为正向锚点。
