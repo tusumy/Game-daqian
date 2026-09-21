@@ -140,6 +140,35 @@ def network_continue_point(img):
         return None
     return (gx,gy)
 
+def sdk_restart_point(img):
+    # “登录界面初始化失败，请尝试重启游戏！sdk”：
+    # 中央白色提示框 + 下方绿色“重启”按钮。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    # 白色/浅灰大弹窗区域
+    modal=hsv[360:670,240:700]
+    if modal.size == 0:
+        return None
+    pale=cv2.inRange(modal,np.array([0,0,150]),np.array([180,80,255]))
+    pale_frac=cv2.countNonZero(pale)/float(pale.shape[0]*pale.shape[1])
+    if pale_frac < 0.45:
+        return None
+
+    # 绿色重启按钮
+    x0,y0,x1,y1=390,560,560,650
+    roi=hsv[y0:y1,x0:x1]
+    green=cv2.inRange(roi,np.array([35,50,80]),np.array([95,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(green)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area < 1800 or w < 80 or h < 25:
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
+
+
 def connection_confirm_point(img):
     # “连接失败，返回登陆界面”的单独橙黄色“确定”按钮。
     # 它的中心在页面更靠右的位置；网络提示左侧“重启”在 x≈394，不能混淆。
@@ -320,6 +349,18 @@ with sync_playwright() as p:
                 matches[name]={"score":float(m[0]),"x":float(m[1][0]),"y":float(m[1][1]),"threshold":thr}
 
         action=None
+
+        # SDK 登录初始化失败：优先点绿色“重启”，再等待游戏重新拉起。
+        if not action and now-last_click.get("sdk_restart",0) >= 12:
+            sp=sdk_restart_point(img)
+            if sp:
+                page.mouse.click(sp[0],sp[1])
+                last_click["sdk_restart"]=now
+                action="sdk_restart"
+                events.append({"t":round(now,2),"action":"sdk_restart",
+                               "x":round(sp[0],1),"y":round(sp[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(15)
 
         # “网络状况不佳”优先处理；弹窗存在时绝不去点背后的公告叉。
         if not action and now-last_click.get("network_continue",0) >= 8:
