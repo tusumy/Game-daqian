@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 */4 * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/farm-trigger.txt'
 
 permissions:
   contents: read
@@ -19,6 +23,22 @@ jobs:
     steps:
       - name: 检查代码
         uses: actions/checkout@v4
+
+      - name: 等待 V2 Probe 释放游戏会话
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            ACTIVE="$(gh run list --branch main --limit 30 --json name,status --jq '[.[] | select(.name == "V2 Popup Probe" and (.status == "in_progress" or .status == "queued"))] | length')"
+            if [ "$ACTIVE" = "0" ]; then
+              echo "没有活动中的 V2 Popup Probe，继续正式药田任务"
+              exit 0
+            fi
+            echo "仍有 $ACTIVE 个 V2 Popup Probe 占用游戏，会话保护中"
+            sleep 30
+          done
+          echo "等待 Probe 释放超时"
+          exit 1
 
       - name: 恢复上一轮成功登录态
         env:
