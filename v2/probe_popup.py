@@ -282,6 +282,27 @@ def scene_change_score(a,b):
     return float(np.mean(cv2.absdiff(ga,gb)))
 
 
+def nested_intro_skip_point(img):
+    # “天魔古域”等完整活动开场动画右上角的金色“跳过»”。
+    # 只在游戏画布右上这块小区域寻找成片金黄色文字，命中后点击固定中心。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=615,185,700,245
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    gold=cv2.inRange(roi,np.array([12,70,120]),np.array([45,255,255]))
+    count=cv2.countNonZero(gold)
+    if count < 120:
+        return None
+    ys,xs=np.where(gold>0)
+    if len(xs)==0:
+        return None
+    cx=float(xs.mean()+x0); cy=float(ys.mean()+y0)
+    if not (630 <= cx <= 680 and 195 <= cy <= 235):
+        return None
+    return (652.0,216.0)
+
+
 def nested_page_back_point(img):
     # “天魔古域”等完整活动页不是弹窗，左上角有青白色返回箭头。
     # 这类页面若误入，直接返回主界面再继续洞府流程。
@@ -538,6 +559,17 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # 完整活动开场动画优先点右上“跳过»”。
+        if not action:
+            sk=nested_intro_skip_point(img)
+            if sk:
+                page.mouse.click(sk[0],sk[1])
+                action="nested_intro_skip"
+                events.append({"t":round(now,2),"action":"nested_intro_skip",
+                               "x":sk[0],"y":sk[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(6)
+
         # 若误入“天魔古域”等完整活动页，优先点左上返回箭头。
         if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
             bp=nested_page_back_point(img)
@@ -702,6 +734,18 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
+                    # 完整活动开场动画先点右上“跳过»”。
+                    sk=nested_intro_skip_point(shot)
+                    if sk:
+                        page.mouse.click(sk[0],sk[1])
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_intro_skip",
+                                       "x":sk[0],"y":sk[1]})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(6)
+                        continue
+
                     # 完整活动页（如“天魔古域”）不是资料覆盖层；先走左上返回。
                     bp=nested_page_back_point(shot)
                     if bp:
@@ -778,9 +822,9 @@ with sync_playwright() as p:
                     if abort_reason:
                         break
                     if closed:
-                        if clear_count >= 12:
+                        if clear_count >= 30:
                             page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
-                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
+                            abort_reason="洞府前弹窗链超过 30 次有效处理，停止继续盲点"
                             break
                         continue
 
@@ -833,9 +877,9 @@ with sync_playwright() as p:
                                            "kind":"modal_x","scene_change":round(change,2)})
                             print("[VISION]",events[-1],flush=True)
                             break
-                        if clear_count >= 12:
+                        if clear_count >= 30:
                             page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
-                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
+                            abort_reason="洞府前弹窗链超过 30 次有效处理，停止继续盲点"
                             break
                         continue
 
