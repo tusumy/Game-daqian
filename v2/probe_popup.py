@@ -160,6 +160,43 @@ def privacy_agree_point(img):
     return best[1] if best else None
 
 
+def upgrade_cancel_point(img):
+    # “感悟升级”覆盖层没有关闭 X，只有“取消 / 前往”双按钮。
+    # 只有同时识别到左侧橙色和右侧绿色的大按钮时才返回“取消”中心，
+    # 避免把普通界面里的单个彩色按钮误当成这个弹窗。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=280,700,680,790
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+
+    orange=cv2.inRange(roi,np.array([0,80,100]),np.array([20,255,255]))
+    green=cv2.inRange(roi,np.array([35,50,100]),np.array([95,255,255]))
+
+    def buttons(mask):
+        n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+        out=[]
+        for i in range(1,n):
+            x,y,w,h,area=stats[i]
+            cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+            if area < 2500 or w < 90 or h < 25:
+                continue
+            if not (720 <= cy <= 770):
+                continue
+            out.append((area,cx,cy,w,h))
+        return out
+
+    left=[b for b in buttons(orange) if 330 <= b[1] <= 420]
+    right=[b for b in buttons(green) if 535 <= b[1] <= 625]
+    if not left or not right:
+        return None
+    a=max(left,key=lambda b:b[0])
+    b=max(right,key=lambda b:b[0])
+    if abs(a[2]-b[2]) > 15:
+        return None
+    return (a[1],a[2])
+
+
 def modal_close_point(img):
     # 洞府入口前的活动海报虽然样式会变，但右上关闭 X 基本固定在 x≈655,y≈230。
     # 只在这块很小的区域检测高亮 X，避免把活动海报遮住主界面误判成“已进洞府”。
@@ -392,6 +429,18 @@ with sync_playwright() as p:
                             closed=True
                             break
                     if closed:
+                        continue
+
+                    # “感悟升级”没有关闭 X；检测到橙/绿双按钮时点左侧“取消”。
+                    up=upgrade_cancel_point(shot)
+                    if up:
+                        page.mouse.click(up[0],up[1])
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_upgrade_cancel",
+                                       "x":round(up[0],1),"y":round(up[1],1)})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(4)
                         continue
 
                     # 有些活动海报（例如“东海寻珍”）的 X 外观和旧模板不同，
