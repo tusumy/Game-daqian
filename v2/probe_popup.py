@@ -28,19 +28,6 @@ def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
 
-def officer_gift_overlay_present(img):
-    # 仙官发玉层会把游戏画面明显压暗，左下固定出现“本次登录不再提示”。
-    if img.shape[0] < 920 or img.shape[1] < 720:
-        return False
-    game_gray=cv2.cvtColor(img[100:950,228:710],cv2.COLOR_BGR2GRAY)
-    if float(game_gray.mean()) > 85:
-        return False
-    roi=img[842:905,292:486]
-    hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
-    white=cv2.inRange(hsv,np.array([0,0,150]),np.array([180,95,255]))
-    nwhite=cv2.countNonZero(white)
-    return 250 <= nwhite <= 1400
-
 def reward_overlay_present(img):
     # 真正的“恭喜获得”奖励层在游戏区域中部有一整块宽大的棕金色横板。
     # 活动海报（造化灵植/鬼修来袭等）虽然也有金色字，但不会有这块大棕板。
@@ -247,21 +234,6 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # 仙官发玉是登录后的前置层，不属于洞府。
-        if not action and officer_gift_overlay_present(img):
-            if not last_click.get("officer_no_remind"):
-                page.mouse.click(311,872)
-                last_click["officer_no_remind"]=now
-                events.append({"t":round(now,2),"action":"officer_no_remind","x":311.0,"y":872.0})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(1)
-            page.mouse.click(690,420)
-            last_click["officer_dismiss"]=now
-            action="officer_dismiss"
-            events.append({"t":round(time.time(),2),"action":"officer_dismiss","x":690.0,"y":420.0})
-            print("[VISION]",events[-1],flush=True)
-            time.sleep(4)
-
         # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
         # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
         if (not action and last_click.get("notice_closed_at")
@@ -323,21 +295,6 @@ with sync_playwright() as p:
                 clean_frames=0
                 while time.time()<cleanup_deadline:
                     shot=screenshot_img(page)
-
-                    # 若洞府点击恰好撞上下一位仙官发玉，先把仙官层收干净。
-                    if officer_gift_overlay_present(shot):
-                        if not last_click.get("officer_no_remind"):
-                            page.mouse.click(311,872)
-                            last_click["officer_no_remind"]=time.time()
-                            events.append({"t":round(time.time(),2),"action":"officer_no_remind","x":311.0,"y":872.0})
-                            print("[VISION]",events[-1],flush=True)
-                            time.sleep(1)
-                        page.mouse.click(690,420)
-                        clear_count+=1
-                        events.append({"t":round(time.time(),2),"action":"officer_dismiss","x":690.0,"y":420.0})
-                        print("[VISION]",events[-1],flush=True)
-                        time.sleep(4)
-                        continue
 
                     # 每日活动弹窗：勾“今日不再提示”后关闭。
                     dm=best_match(shot,"v2/templates/daily_no_remind.png")
