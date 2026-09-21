@@ -22,7 +22,17 @@ def env_flag(name, default=False):
 
 
 def load_storage_state():
-    """优先读取 GitHub Secret；本地仍兼容仓库里的 auth.json。"""
+    """优先读取上一轮持久化状态，再回退到 GitHub Secret / auth.json。"""
+    state_file = (os.getenv("GAME_AUTH_FILE") or "").strip()
+    if state_file and os.path.exists(state_file):
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            print(f"[+] 已从上一轮状态载入登录态：{state_file}")
+            return state
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[-] 上一轮登录态读取失败：{exc}")
+
     raw = (os.getenv("GAME_AUTH_JSON") or os.getenv("AUTH_JSON") or "").strip()
     if raw:
         try:
@@ -419,6 +429,11 @@ def run():
                     pass
             raise
         finally:
+            try:
+                context.storage_state(path="farm_storage_state.json")
+                print("[+] 已保存本轮登录态：farm_storage_state.json")
+            except Exception as exc:
+                print(f"[-] 保存本轮登录态失败：{exc}")
             browser.close()
 
 
