@@ -6,7 +6,7 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq14/storage_state.json"
+AUTH="/tmp/xddq17/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
@@ -146,7 +146,7 @@ with sync_playwright() as p:
                 time.sleep(6)
 
         # 启动画面出现“踏入仙途”时进入游戏。
-        if not action and not last_click.get("enter_game"):
+        if not action and now-last_click.get("enter_game",0) >= 15:
             ep=enter_game_point(img)
             if ep:
                 page.mouse.click(ep[0],ep[1])
