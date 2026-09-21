@@ -6,12 +6,11 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq18/storage_state.json"
+AUTH="/tmp/xddq19/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
-    "dongfu": ("v2/templates/dongfu.png", 0.84),
 }
 
 def best_match(img, tpl_path):
@@ -26,6 +25,26 @@ def best_match(img, tpl_path):
 def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
+
+def main_dongfu_point(img):
+    # 主界面底部中央有一枚很大的金色圆盘；这是比旧“洞府”小图标模板
+    # 稳定得多的主界面锚点。只有识别到它，才点击左下“洞府”。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=390,800,560,950
+    roi=hsv[y0:y1,x0:x1]
+    gold=cv2.inRange(roi,np.array([12,60,90]),np.array([45,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(gold)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        if area < 2500 or w < 55 or h < 55:
+            continue
+        if best is None or area > best[0]:
+            best=(area,w,h)
+    if not best:
+        return None
+    # 当前 1280x960 页面中，洞府按钮中心约在 (368, 920)。
+    return (368.0,920.0)
 
 def enter_game_point(img):
     # “踏入仙途”只出现在启动画面的下部中间。
@@ -195,9 +214,21 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(12)
 
+        # 真正进入主界面后，点击底部“洞府”。
+        if not action:
+            dp=main_dongfu_point(img)
+            if dp:
+                page.mouse.click(dp[0],dp[1])
+                last_click["dongfu_main"]=now
+                action="dongfu_main"
+                clicked_dongfu=True
+                events.append({"t":round(now,2),"action":"dongfu_main","x":dp[0],"y":dp[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(10)
+
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:
-          for name in ("notice_x","event_x","dongfu"):
+          for name in ("notice_x","event_x"):
               info=matches.get(name)
               if not info or info["score"] < info["threshold"]:
                   continue
