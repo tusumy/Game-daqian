@@ -176,9 +176,8 @@ with sync_playwright() as p:
 
     events=[]
     clicked_dongfu=False
-    deadline=time.time()+420
+    deadline=time.time()+1500
     last_click={}
-    idle_since=time.time()
 
     while time.time()<deadline and not clicked_dongfu:
         img=screenshot_img(page)
@@ -235,17 +234,17 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # “踏入仙途”必须按当前画面判断，不能依赖“刚关闭过公告”。
-        # 登录态继承后公告可能根本不再出现；旧逻辑会因此永远卡在启动页。
-        if not action and now-last_click.get("enter_game",0) >= 8:
-            ep=enter_game_point(img)
-            if ep:
-                page.mouse.click(ep[0],ep[1])
-                last_click["enter_game"]=now
-                action="enter_game"
-                events.append({"t":round(now,2),"action":"enter_game","x":ep[0],"y":ep[1]})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(15)
+        # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
+        # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
+        if (not action and last_click.get("notice_closed_at")
+                and not last_click.get("enter_after_notice")
+                and now-last_click["notice_closed_at"] >= 3):
+            page.mouse.click(480,790)
+            last_click["enter_after_notice"]=now
+            action="enter_after_notice"
+            events.append({"t":round(now,2),"action":"enter_after_notice","x":480.0,"y":790.0})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(15)
 
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
         if not action:
@@ -262,16 +261,16 @@ with sync_playwright() as p:
                 time.sleep(4)
 
         # 仙官发玉不是必经流程，只在真的出现时处理。
-        # 勾“本次登录不再提示”后点空白收掉；若没出现就完全跳过。
+        # 不再勾“本次登录不再提示”：该勾选会弹出“无法获得对应奖励”的二次确认。
+        # 让奖励动画完成后直接收掉仙官层，保留本次玉奖励。
         if not action:
             oi=matches.get("officer_no_remind")
             if oi and oi["score"] >= oi["threshold"]:
-                page.mouse.click(oi["x"]-86, oi["y"])
-                time.sleep(1)
+                time.sleep(4)
                 page.mouse.click(690,420)
                 last_click["officer_popup"]=now
                 action="officer_popup"
-                events.append({"t":round(now,2),"action":"officer_no_remind",
+                events.append({"t":round(now,2),"action":"officer_reward_dismiss",
                                "score":round(oi["score"],4)})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(4)
@@ -297,6 +296,17 @@ with sync_playwright() as p:
                 while time.time()<cleanup_deadline:
                     shot=screenshot_img(page)
 
+                    # 洞府必须用正向锚点确认：只有“丹界药田”入口真的出现才算进入成功。
+                    # 任何活动海报/确认框把主界面遮住，都不能再被误判成洞府。
+                    cave=best_match(shot,"danjie_btn.png")
+                    if cave and cave[0] >= 0.70:
+                        page.screenshot(path=str(OUT/"actual_dongfu.png"),full_page=True)
+                        events.append({"t":round(time.time(),2),"action":"dongfu_verified",
+                                       "score":round(float(cave[0]),4),"cleared":clear_count})
+                        print("[VISION]",events[-1],flush=True)
+                        clicked_dongfu=True
+                        break
+
                     # 每日活动弹窗：勾“今日不再提示”后关闭。
                     dm=best_match(shot,"v2/templates/daily_no_remind.png")
                     if dm and dm[0] >= 0.78:
@@ -310,15 +320,15 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
-                    # 仙官发玉：可选分支，出现才处理。
+                    # 仙官发玉：可选分支，先让玉正常发完，再收掉仙官层。
+                    # 不勾“不再提示”，避免触发“无法获得对应奖励”的确认框。
                     om=best_match(shot,"v2/templates/officer_no_remind.png")
                     if om and om[0] >= 0.80:
-                        page.mouse.click(om[1][0]-86,om[1][1])
-                        time.sleep(1)
+                        time.sleep(4)
                         page.mouse.click(690,420)
                         clear_count+=1
                         clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_no_remind"})
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_dismiss"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
@@ -374,16 +384,16 @@ with sync_playwright() as p:
                             time.sleep(2)
                         continue
 
-                    # 已无已知覆盖层，也不再是主界面时先连续观察三帧，
-                    # 避免某个未知弹窗把主界面遮暗后被误判成“已进洞府”。
+                    # 未看到主界面也未看到“丹界药田”时，只能说明有未知覆盖层/过渡画面。
+                    # 绝不能再把“主界面消失”当成洞府成功。
                     clean_frames+=1
-                    if clean_frames < 3:
-                        time.sleep(2)
-                        continue
-                    events.append({"t":round(time.time(),2),"action":"dongfu_verified","cleared":clear_count})
-                    print("[VISION]",events[-1],flush=True)
-                    clicked_dongfu=True
-                    break
+                    if clean_frames % 3 == 0:
+                        page.screenshot(path=str(OUT/"dongfu_unverified.png"),full_page=True)
+                        events.append({"t":round(time.time(),2),"action":"dongfu_unverified",
+                                       "clean_frames":clean_frames,"cleared":clear_count})
+                        print("[VISION]",events[-1],flush=True)
+                    time.sleep(2)
+                    continue
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:
@@ -406,15 +416,7 @@ with sync_playwright() as p:
                   clicked_dongfu=True
               break
 
-        if action:
-            idle_since=time.time()
-        else:
-            if time.time()-idle_since >= 120:
-                page.screenshot(path=str(OUT/"stalled_unknown.png"),full_page=True)
-                diag={name:round(info["score"],4) for name,info in matches.items()}
-                events.append({"t":round(time.time(),2),"action":"stalled_unknown","template_scores":diag})
-                print("[VISION]",events[-1],flush=True)
-                break
+        if not action:
             time.sleep(2)
 
     page.screenshot(path=str(OUT/"after_vision.png"),full_page=True)
@@ -425,4 +427,4 @@ with sync_playwright() as p:
     browser.close()
 
     if not clicked_dongfu:
-        raise RuntimeError("V2 Probe 未验证进入洞府；已保存 stalled/after_vision 证据")
+        raise RuntimeError("V2 Probe 未看到丹界药田入口，不能判定已进入洞府")
