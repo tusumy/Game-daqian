@@ -282,6 +282,32 @@ def scene_change_score(a,b):
     return float(np.mean(cv2.absdiff(ga,gb)))
 
 
+def nested_page_back_point(img):
+    # “天魔古域”等完整活动页不是弹窗，左上角有青白色返回箭头。
+    # 这类页面若误入，直接返回主界面再继续洞府流程。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=235,95,300,145
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    # 兼容青色/浅白箭头
+    cyan=cv2.inRange(roi,np.array([75,20,130]),np.array([110,255,255]))
+    pale=cv2.inRange(roi,np.array([0,0,180]),np.array([180,90,255]))
+    mask=cv2.bitwise_or(cyan,pale)
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area < 80 or w < 18 or h < 10:
+            continue
+        if not (245 <= cx <= 275 and 105 <= cy <= 135):
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
+
+
 def promo_yellow_x_point(img):
     # “高额返利/充值”类推广弹窗：关闭键是右上偏下的黄色 X，
     # 位置约在页面 (675,300)，与普通活动海报的白色 X 不同。
@@ -486,6 +512,17 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # 若误入“天魔古域”等完整活动页，优先点左上返回箭头。
+        if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
+            bp=nested_page_back_point(img)
+            if bp:
+                page.mouse.click(bp[0],bp[1])
+                action="nested_page_back"
+                events.append({"t":round(now,2),"action":"nested_page_back",
+                               "x":round(bp[0],1),"y":round(bp[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(5)
+
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
             yp=promo_yellow_x_point(img)
@@ -637,6 +674,18 @@ with sync_playwright() as p:
                         events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_dismiss"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
+                        continue
+
+                    # 完整活动页（如“天魔古域”）不是资料覆盖层；先走左上返回。
+                    bp=nested_page_back_point(shot)
+                    if bp:
+                        page.mouse.click(bp[0],bp[1])
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
+                                       "x":round(bp[0],1),"y":round(bp[1],1)})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(5)
                         continue
 
                     # 资料提示层：点旁边暗处。
