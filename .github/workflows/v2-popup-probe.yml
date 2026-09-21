@@ -31,7 +31,21 @@ jobs:
         run: |
           rm -rf /tmp/xddq29
           mkdir -p /tmp/xddq29
-          gh run download 35562579777 -n xddq-auth-state-29 -D /tmp/xddq29
+
+          PREV_RUN="$(gh run list --workflow v2-popup-probe.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          if [ -n "$PREV_RUN" ]; then
+            echo "Restoring auth state from previous successful probe run $PREV_RUN"
+            gh run download "$PREV_RUN" -p 'xddq-auth-state-*' -D /tmp/xddq29
+          else
+            echo "No previous successful probe run found; using bootstrap state"
+            gh run download 35562579777 -n xddq-auth-state-29 -D /tmp/xddq29
+          fi
+
+          STATE_FILE="$(find /tmp/xddq29 -name storage_state.json -print -quit)"
+          test -n "$STATE_FILE"
+          if [ "$STATE_FILE" != "/tmp/xddq29/storage_state.json" ]; then
+            cp "$STATE_FILE" /tmp/xddq29/storage_state.json
+          fi
           test -f /tmp/xddq29/storage_state.json
       - run: python v2/probe_popup.py
       - name: Preserve auth state
