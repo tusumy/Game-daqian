@@ -4,10 +4,6 @@ on:
   schedule:
     - cron: '0 */4 * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/farm-trigger.txt'
 
 permissions:
   contents: read
