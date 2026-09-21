@@ -6,7 +6,7 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq23/storage_state.json"
+AUTH="/tmp/xddq24/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
@@ -25,6 +25,21 @@ def best_match(img, tpl_path):
 def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
+
+def profile_overlay_present(img):
+    # 点洞府后偶发“北斗星君 / 仙王后期 / 本次登录不再提示”覆盖层。
+    # 只检测它下方中间那枚橙色境界按钮，避免把别的橙色 UI 当成覆盖层。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=400,700,550,780
+    roi=hsv[y0:y1,x0:x1]
+    mask=cv2.inRange(roi,np.array([0,70,100]),np.array([35,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area >= 1200 and 85 <= w <= 140 and 28 <= h <= 60 and 450 <= cx <= 500 and 720 <= cy <= 760:
+            return True
+    return False
 
 def main_dongfu_point(img):
     # 主界面底部中央有一枚很大的金色圆盘；这是比旧“洞府”小图标模板
@@ -230,10 +245,24 @@ with sync_playwright() as p:
                 page.mouse.click(dp[0],dp[1])
                 last_click["dongfu_main"]=now
                 action="dongfu_main"
-                clicked_dongfu=True
                 events.append({"t":round(now,2),"action":"dongfu_main","x":dp[0],"y":dp[1]})
                 print("[VISION]",events[-1],flush=True)
-                time.sleep(10)
+                time.sleep(6)
+
+                # 首次点洞府后若出现“北斗星君”覆盖层，按用户提示点旁边暗处关闭，
+                # 然后再点一次洞府，拿真正的洞府页面。
+                img2=screenshot_img(page)
+                page.screenshot(path=str(OUT/"after_first_dongfu_click.png"),full_page=True)
+                if profile_overlay_present(img2):
+                    page.mouse.click(250,700)
+                    events.append({"t":round(time.time(),2),"action":"dismiss_profile_overlay","x":250.0,"y":700.0})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(4)
+                    page.mouse.click(dp[0],dp[1])
+                    events.append({"t":round(time.time(),2),"action":"dongfu_retry","x":dp[0],"y":dp[1]})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(8)
+                clicked_dongfu=True
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:

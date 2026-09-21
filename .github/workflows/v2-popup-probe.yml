@@ -29,10 +29,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf /tmp/xddq23
-          mkdir -p /tmp/xddq23
-          gh run download 35553940147 -n xddq-popup-probe-23 -D /tmp/xddq23
-          test -f /tmp/xddq23/storage_state.json
+          rm -rf /tmp/xddq24
+          mkdir -p /tmp/xddq24
+          gh run download 35556079387 -n xddq-popup-probe-24 -D /tmp/xddq24
+          test -f /tmp/xddq24/storage_state.json
       - run: python v2/probe_popup.py
       - uses: actions/upload-artifact@v4
         if: always()
