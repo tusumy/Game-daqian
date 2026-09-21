@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   farm:
@@ -18,6 +19,25 @@ jobs:
     steps:
       - name: 检查代码
         uses: actions/checkout@v4
+
+      - name: 恢复上一轮成功登录态
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/farm-auth
+          mkdir -p /tmp/farm-auth
+
+          for RUN_ID in $(gh run list --workflow run.yml --branch main --status success --limit 10 --json databaseId --jq '.[].databaseId'); do
+            rm -rf /tmp/farm-auth/*
+            if gh run download "$RUN_ID" -p 'farm-auth-state-*' -D /tmp/farm-auth >/dev/null 2>&1; then
+              STATE_FILE="$(find /tmp/farm-auth -name farm_storage_state.json -print -quit)"
+              if [ -n "$STATE_FILE" ]; then
+                echo "GAME_AUTH_FILE=$STATE_FILE" >> "$GITHUB_ENV"
+                echo "已恢复登录态：run $RUN_ID"
+                break
+              fi
+            fi
+          done
 
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
@@ -39,6 +59,15 @@ jobs:
           VIEWPORT_HEIGHT: '900'
           PYTHONUNBUFFERED: '1'
         run: python cron_farm.py
+
+      - name: 保存本轮登录态
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: farm-auth-state-${{ github.run_number }}
+          path: farm_storage_state.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: 上传调试截图
         if: always()
