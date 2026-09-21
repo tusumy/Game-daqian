@@ -6,10 +6,9 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq19/storage_state.json"
+AUTH="/tmp/xddq22/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
-    "enter_game_tpl": ("v2/templates/enter_game_small.jpg", 0.80),
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
 }
@@ -208,16 +207,17 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # 启动画面“踏入仙途”改用模板匹配，避免公告页/加载页误触。
-        if not action and now-last_click.get("enter_game_tpl",0) >= 15:
-            info=matches.get("enter_game_tpl")
-            if info and info["score"] >= info["threshold"]:
-                page.mouse.click(info["x"],info["y"])
-                last_click["enter_game_tpl"]=now
-                action="enter_game_tpl"
-                events.append({"t":round(now,2),"action":"enter_game_tpl","score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(12)
+        # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
+        # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
+        if (not action and last_click.get("notice_closed_at")
+                and not last_click.get("enter_after_notice")
+                and now-last_click["notice_closed_at"] >= 3):
+            page.mouse.click(480,790)
+            last_click["enter_after_notice"]=now
+            action="enter_after_notice"
+            events.append({"t":round(now,2),"action":"enter_after_notice","x":480.0,"y":790.0})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(15)
 
         # 真正进入主界面后，点击底部“洞府”。
         if not action:
@@ -242,6 +242,9 @@ with sync_playwright() as p:
               page.mouse.click(info["x"],info["y"])
               last_click[name]=now
               action=name
+              if name=="notice_x":
+                  last_click["notice_closed_at"]=now
+                  last_click.pop("enter_after_notice",None)
               events.append({"t":round(now,2),"action":name,"score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
               print("[VISION]",events[-1],flush=True)
               time.sleep(4 if name!="dongfu" else 10)
