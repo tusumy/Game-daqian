@@ -328,15 +328,23 @@ def modal_close_point(img):
     return best[1] if best else None
 
 def probe_existing_plant(page, events):
-    # 丹界验证成功后只点一株现有灵植取证，不继续执行收取/选种/播种。
-    # 当前 1280x960 画布中，这个点落在药田中央的一株现有灵植上。
+    # 丹界验证成功后只收一株成熟灵植：先点成熟作物，再点弹出的左侧“收获”。
+    # 绝不点击右侧“一键收获”，避免一次性收掉全部药田。
     x,y=451.0,526.0
     page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
     page.mouse.click(x,y)
     events.append({"t":round(time.time(),2),"action":"mature_plant_probe_click","x":x,"y":y})
     print("[VISION]",events[-1],flush=True)
-    time.sleep(4)
+    time.sleep(3)
     page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
+
+    # 当前“特权”菜单：左侧“收获”按钮中心约在 (425,625)。
+    hx,hy=425.0,625.0
+    page.mouse.click(hx,hy)
+    events.append({"t":round(time.time(),2),"action":"single_harvest_click","x":hx,"y":hy})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(4)
+    page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
 
 
 with sync_playwright() as p:
