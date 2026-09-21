@@ -197,6 +197,43 @@ def upgrade_cancel_point(img):
     return (a[1],a[2])
 
 
+def today_no_remind_point(img):
+    # 活动海报底部“今日不再提示”左侧的小方框。
+    # 当前游戏画布固定在 1280x960 页面中，该控件稳定落在这块很小的区域。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=515,810,555,845
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    pale=cv2.inRange(roi,np.array([0,0,120]),np.array([180,110,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(pale)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (8 <= w <= 18 and 8 <= h <= 18 and 25 <= area <= 180):
+            continue
+        if not (525 <= cx <= 545 and 818 <= cy <= 840):
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
+
+
+def scene_change_score(a,b):
+    # 判断点关闭键后主游戏区域是否真的发生明显变化。
+    # 先缩小再比较，降低角色小动画/粒子动画造成的噪声。
+    ra=a[120:900,228:712]
+    rb=b[120:900,228:712]
+    if ra.size == 0 or rb.size == 0 or ra.shape != rb.shape:
+        return 999.0
+    ga=cv2.cvtColor(ra,cv2.COLOR_BGR2GRAY)
+    gb=cv2.cvtColor(rb,cv2.COLOR_BGR2GRAY)
+    ga=cv2.resize(ga,(64,96),interpolation=cv2.INTER_AREA)
+    gb=cv2.resize(gb,(64,96),interpolation=cv2.INTER_AREA)
+    return float(np.mean(cv2.absdiff(ga,gb)))
+
+
 def modal_close_point(img):
     # 洞府入口前的活动海报虽然样式会变，但右上关闭 X 基本固定在 x≈655,y≈230。
     # 只在这块很小的区域检测高亮 X，避免把活动海报遮住主界面误判成“已进洞府”。
@@ -237,10 +274,11 @@ with sync_playwright() as p:
 
     events=[]
     clicked_dongfu=False
-    deadline=time.time()+1500
+    abort_reason=None
+    deadline=time.time()+540
     last_click={}
 
-    while time.time()<deadline and not clicked_dongfu:
+    while time.time()<deadline and not clicked_dongfu and not abort_reason:
         img=screenshot_img(page)
         now=time.time()
         matches={}
@@ -350,7 +388,7 @@ with sync_playwright() as p:
                 time.sleep(6)
                 page.screenshot(path=str(OUT/"after_first_dongfu_click.png"),full_page=True)
 
-                cleanup_deadline=time.time()+120
+                cleanup_deadline=time.time()+90
                 last_dongfu_retry=time.time()
                 clear_count=0
                 clean_frames=0
@@ -413,22 +451,43 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
-                    # 各类活动海报统一优先点右上 X。
+                    # 各类活动海报优先处理；如果海报底部有“今日不再提示”，
+                    # 先勾上再关 X，避免同一批活动层反复出现。
                     closed=False
                     for pname in ("event_x","notice_x"):
                         ppath,thr=TEMPLATES[pname]
                         mm=best_match(shot,ppath)
                         if mm and mm[0] >= thr:
+                            chk=today_no_remind_point(shot) if pname=="event_x" else None
+                            if chk:
+                                page.mouse.click(chk[0],chk[1])
+                                time.sleep(0.8)
+                            before_close=screenshot_img(page)
                             page.mouse.click(mm[1][0],mm[1][1])
                             clear_count+=1
+                            time.sleep(2)
+                            after_close=screenshot_img(page)
+                            change=scene_change_score(before_close,after_close)
                             events.append({"t":round(time.time(),2),"action":"post_dongfu_"+pname,
                                            "score":round(float(mm[0]),4),
-                                           "x":round(float(mm[1][0]),1),"y":round(float(mm[1][1]),1)})
+                                           "x":round(float(mm[1][0]),1),"y":round(float(mm[1][1]),1),
+                                           "today_no_remind":bool(chk),"scene_change":round(change,2)})
                             print("[VISION]",events[-1],flush=True)
-                            time.sleep(4)
+                            if change < 2.0:
+                                page.screenshot(path=str(OUT/"stuck_event_close.png"),full_page=True)
+                                abort_reason=f"{pname} 点击关闭后画面未变化"
+                                events.append({"t":round(time.time(),2),"action":"popup_close_stuck",
+                                               "kind":pname,"scene_change":round(change,2)})
+                                print("[VISION]",events[-1],flush=True)
                             closed=True
                             break
+                    if abort_reason:
+                        break
                     if closed:
+                        if clear_count >= 12:
+                            page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
+                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
+                            break
                         continue
 
                     # “感悟升级”没有关闭 X；检测到橙/绿双按钮时点左侧“取消”。
@@ -447,13 +506,28 @@ with sync_playwright() as p:
                     # 但位置稳定。识别到右上高亮 X 就先关掉，再继续验证洞府。
                     mp=modal_close_point(shot)
                     if mp:
+                        before_close=shot
                         page.mouse.click(mp[0],mp[1])
                         clear_count+=1
                         clean_frames=0
+                        time.sleep(2)
+                        after_close=screenshot_img(page)
+                        change=scene_change_score(before_close,after_close)
                         events.append({"t":round(time.time(),2),"action":"post_dongfu_modal_x",
-                                       "x":round(mp[0],1),"y":round(mp[1],1)})
+                                       "x":round(mp[0],1),"y":round(mp[1],1),
+                                       "scene_change":round(change,2)})
                         print("[VISION]",events[-1],flush=True)
-                        time.sleep(4)
+                        if change < 2.0:
+                            page.screenshot(path=str(OUT/"stuck_modal_x.png"),full_page=True)
+                            abort_reason="通用关闭 X 点击后画面未变化"
+                            events.append({"t":round(time.time(),2),"action":"popup_close_stuck",
+                                           "kind":"modal_x","scene_change":round(change,2)})
+                            print("[VISION]",events[-1],flush=True)
+                            break
+                        if clear_count >= 12:
+                            page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
+                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
+                            break
                         continue
 
                     # 还看得到主界面锚点，说明弹窗清完但洞府并未真正打开，再点一次。
@@ -512,5 +586,7 @@ with sync_playwright() as p:
     context.storage_state(path=str(OUT/"storage_state.json"))
     browser.close()
 
+    if abort_reason:
+        raise RuntimeError(abort_reason)
     if not clicked_dongfu:
         raise RuntimeError("V2 Probe 未看到丹界药田入口，不能判定已进入洞府")
