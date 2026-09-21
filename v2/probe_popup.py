@@ -414,6 +414,26 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # 内层清弹窗窗口结束后，仍可能晚到一张新的活动海报（如“修罗战场”）。
+        # 外层只在“当前不是主界面”时启用通用右上 X，避免把主页亮点误当关闭键。
+        if not action and not main_dongfu_point(img):
+            mp=modal_close_point(img)
+            if mp:
+                before_close=img
+                page.mouse.click(mp[0],mp[1])
+                time.sleep(2)
+                after_close=screenshot_img(page)
+                change=scene_change_score(before_close,after_close)
+                events.append({"t":round(now,2),"action":"outer_modal_x",
+                               "x":round(mp[0],1),"y":round(mp[1],1),
+                               "scene_change":round(change,2)})
+                print("[VISION]",events[-1],flush=True)
+                if change >= 2.0:
+                    action="outer_modal_x"
+                    time.sleep(2)
+                else:
+                    page.screenshot(path=str(OUT/"outer_stuck_modal_x.png"),full_page=True)
+
         # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
         if not action:
             di=matches.get("daily_no_remind")
