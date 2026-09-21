@@ -278,10 +278,10 @@ def modal_close_point(img):
 def probe_existing_plant(page, events):
     # 丹界验证成功后只点一株现有灵植取证，不继续执行收取/选种/播种。
     # 当前 1280x960 画布中，这个点落在药田中央的一株现有灵植上。
-    x,y=500.0,560.0
+    x,y=451.0,526.0
     page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
     page.mouse.click(x,y)
-    events.append({"t":round(time.time(),2),"action":"plant_probe_click","x":x,"y":y})
+    events.append({"t":round(time.time(),2),"action":"mature_plant_probe_click","x":x,"y":y})
     print("[VISION]",events[-1],flush=True)
     time.sleep(4)
     page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
