@@ -9,6 +9,7 @@ OUT.mkdir(parents=True,exist_ok=True)
 AUTH="/tmp/xddq19/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
+    "enter_game_tpl": ("v2/templates/enter_game_small.jpg", 0.80),
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
 }
@@ -207,14 +208,14 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # 启动画面出现“踏入仙途”时进入游戏。
-        if not action and now-last_click.get("enter_game",0) >= 15:
-            ep=enter_game_point(img)
-            if ep:
-                page.mouse.click(ep[0],ep[1])
-                last_click["enter_game"]=now
-                action="enter_game"
-                events.append({"t":round(now,2),"action":"enter_game","x":ep[0],"y":ep[1]})
+        # 启动画面“踏入仙途”改用模板匹配，避免公告页/加载页误触。
+        if not action and now-last_click.get("enter_game_tpl",0) >= 15:
+            info=matches.get("enter_game_tpl")
+            if info and info["score"] >= info["threshold"]:
+                page.mouse.click(info["x"],info["y"])
+                last_click["enter_game_tpl"]=now
+                action="enter_game_tpl"
+                events.append({"t":round(now,2),"action":"enter_game_tpl","score":round(info["score"],4),"x":round(info["x"],1),"y":round(info["y"],1)})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(12)
 
