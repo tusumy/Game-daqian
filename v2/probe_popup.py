@@ -425,11 +425,26 @@ with sync_playwright() as p:
                                        "x":menu[0],"y":menu[1],
                                        "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
                         print("[VISION]",events[-1],flush=True)
-                        time.sleep(10)
-                        page.screenshot(path=str(OUT/"after_danjie_click.png"),full_page=True)
-                        # 这一轮只把新版“丹界”入口走通并取证；下一页仍需正向识别，
-                        # 不能因为菜单消失就冒充已经到药田。
-                        abort_reason="已点击新版洞府菜单中的丹界；已保存下一页画面等待识别"
+
+                        # 点中丹界后会出现加载圈，旧版固定 sleep 10 秒会截到半途。
+                        # 最多等 45 秒，直到洞府菜单真正消失，再保存下一页真实画面。
+                        transition_deadline=time.time()+45
+                        transitioned=False
+                        while time.time()<transition_deadline:
+                            time.sleep(3)
+                            nxt=screenshot_img(page)
+                            if not dongfu_menu_danjie_point(nxt):
+                                time.sleep(4)
+                                page.screenshot(path=str(OUT/"after_danjie_transition.png"),full_page=True)
+                                events.append({"t":round(time.time(),2),"action":"danjie_transition_complete"})
+                                print("[VISION]",events[-1],flush=True)
+                                transitioned=True
+                                break
+                        if not transitioned:
+                            page.screenshot(path=str(OUT/"after_danjie_click_loading.png"),full_page=True)
+                            abort_reason="点击丹界后 45 秒洞府菜单仍未消失；已保存加载现场"
+                        else:
+                            abort_reason="已进入丹界下一页；已保存真实页面等待识别药田"
                         break
 
                     # 兼容旧 UI：若旧“丹界药田”模板仍能命中，也允许作为正向锚点。
