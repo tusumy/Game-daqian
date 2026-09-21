@@ -73,6 +73,25 @@ def main_dongfu_point(img):
     # 当前 1280x960 页面中，洞府按钮中心约在 (368, 920)。
     return (368.0,920.0)
 
+def dongfu_menu_danjie_point(img):
+    # 新版洞府不是直接出现“丹界药田”按钮，而是先展开一张米白色功能菜单。
+    # 左侧长列与右下“丹界/仙途寻宝”两格同时出现时，才认为是真正的洞府菜单。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    left=hsv[210:875,270:475]
+    right_bottom=hsv[740:875,480:680]
+    if left.size == 0 or right_bottom.size == 0:
+        return None
+    def pale_frac(roi):
+        pale=cv2.inRange(roi,np.array([0,0,140]),np.array([180,110,255]))
+        return cv2.countNonZero(pale)/float(pale.size)
+    lf=pale_frac(left)
+    rf=pale_frac(right_bottom)
+    if lf >= 0.65 and rf >= 0.45:
+        # 当前固定 1280x960 画布中，“丹界”卡片中心约为 (575,785)。
+        return (575.0,785.0,lf,rf)
+    return None
+
+
 def enter_game_point(img):
     # “踏入仙途”只出现在启动画面的下部中间。
     h,w=img.shape[:2]
@@ -274,6 +293,7 @@ with sync_playwright() as p:
 
     events=[]
     clicked_dongfu=False
+    danjie_entry_clicked=False
     abort_reason=None
     deadline=time.time()+540
     last_click={}
@@ -395,12 +415,28 @@ with sync_playwright() as p:
                 while time.time()<cleanup_deadline:
                     shot=screenshot_img(page)
 
-                    # 洞府必须用正向锚点确认：只有“丹界药田”入口真的出现才算进入成功。
-                    # 任何活动海报/确认框把主界面遮住，都不能再被误判成洞府。
+                    # 先识别新版洞府菜单；当前 UI 需要在菜单右下再点一次“丹界”。
+                    menu=dongfu_menu_danjie_point(shot)
+                    if menu and not danjie_entry_clicked:
+                        page.screenshot(path=str(OUT/"actual_dongfu_menu.png"),full_page=True)
+                        page.mouse.click(menu[0],menu[1])
+                        danjie_entry_clicked=True
+                        events.append({"t":round(time.time(),2),"action":"dongfu_menu_danjie",
+                                       "x":menu[0],"y":menu[1],
+                                       "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(10)
+                        page.screenshot(path=str(OUT/"after_danjie_click.png"),full_page=True)
+                        # 这一轮只把新版“丹界”入口走通并取证；下一页仍需正向识别，
+                        # 不能因为菜单消失就冒充已经到药田。
+                        abort_reason="已点击新版洞府菜单中的丹界；已保存下一页画面等待识别"
+                        break
+
+                    # 兼容旧 UI：若旧“丹界药田”模板仍能命中，也允许作为正向锚点。
                     cave=best_match(shot,"danjie_btn.png")
                     if cave and cave[0] >= 0.70:
                         page.screenshot(path=str(OUT/"actual_dongfu.png"),full_page=True)
-                        events.append({"t":round(time.time(),2),"action":"dongfu_verified",
+                        events.append({"t":round(time.time(),2),"action":"dongfu_verified_legacy",
                                        "score":round(float(cave[0]),4),"cleared":clear_count})
                         print("[VISION]",events[-1],flush=True)
                         clicked_dongfu=True
