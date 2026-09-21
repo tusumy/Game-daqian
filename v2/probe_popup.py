@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq28/storage_state.json"
+AUTH="/tmp/xddq29/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 GAME_URL="https://www.wanyiwan.top/game/xddq"
 TEMPLATES={
@@ -272,6 +272,35 @@ with sync_playwright() as p:
             print("[VISION]",events[-1],flush=True)
             time.sleep(15)
 
+        # 每日活动弹窗是常规分支：看到“今日不再提示”就勾上，再关右上角 X。
+        if not action:
+            di=matches.get("daily_no_remind")
+            if di and di["score"] >= di["threshold"]:
+                page.mouse.click(di["x"]-42, di["y"])
+                time.sleep(1)
+                page.mouse.click(655,230)
+                last_click["daily_popup"]=now
+                action="daily_popup"
+                events.append({"t":round(now,2),"action":"daily_popup_no_remind",
+                               "score":round(di["score"],4)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(4)
+
+        # 仙官发玉不是必经流程，只在真的出现时处理。
+        # 勾“本次登录不再提示”后点空白收掉；若没出现就完全跳过。
+        if not action:
+            oi=matches.get("officer_no_remind")
+            if oi and oi["score"] >= oi["threshold"]:
+                page.mouse.click(oi["x"]-86, oi["y"])
+                time.sleep(1)
+                page.mouse.click(690,420)
+                last_click["officer_popup"]=now
+                action="officer_popup"
+                events.append({"t":round(now,2),"action":"officer_no_remind",
+                               "score":round(oi["score"],4)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(4)
+
         # 真正进入主界面后，点击底部“洞府”。
         # 点下去之后不立刻判成功：先连续清掉活动/奖励/资料覆盖层，
         # 直到主界面的金色圆盘锚点消失，才说明页面真的离开主界面。
@@ -289,6 +318,7 @@ with sync_playwright() as p:
                 cleanup_deadline=time.time()+120
                 last_dongfu_retry=time.time()
                 clear_count=0
+                clean_frames=0
                 while time.time()<cleanup_deadline:
                     shot=screenshot_img(page)
 
@@ -303,6 +333,32 @@ with sync_playwright() as p:
                         page.mouse.click(690,420)
                         clear_count+=1
                         events.append({"t":round(time.time(),2),"action":"officer_dismiss","x":690.0,"y":420.0})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(4)
+                        continue
+
+                    # 每日活动弹窗：勾“今日不再提示”后关闭。
+                    dm=best_match(shot,"v2/templates/daily_no_remind.png")
+                    if dm and dm[0] >= 0.78:
+                        page.mouse.click(dm[1][0]-42,dm[1][1])
+                        time.sleep(1)
+                        page.mouse.click(655,230)
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_daily_no_remind"})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(4)
+                        continue
+
+                    # 仙官发玉：可选分支，出现才处理。
+                    om=best_match(shot,"v2/templates/officer_no_remind.png")
+                    if om and om[0] >= 0.80:
+                        page.mouse.click(om[1][0]-86,om[1][1])
+                        time.sleep(1)
+                        page.mouse.click(690,420)
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_no_remind"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
@@ -358,7 +414,12 @@ with sync_playwright() as p:
                             time.sleep(2)
                         continue
 
-                    # 已无已知覆盖层，也不再是主界面：认为已真正进入洞府/洞府子页。
+                    # 已无已知覆盖层，也不再是主界面时先连续观察三帧，
+                    # 避免某个未知弹窗把主界面遮暗后被误判成“已进洞府”。
+                    clean_frames+=1
+                    if clean_frames < 3:
+                        time.sleep(2)
+                        continue
                     events.append({"t":round(time.time(),2),"action":"dongfu_verified","cleared":clear_count})
                     print("[VISION]",events[-1],flush=True)
                     clicked_dongfu=True
