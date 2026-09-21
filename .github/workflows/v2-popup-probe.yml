@@ -29,14 +29,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf /tmp/xddq25
-          mkdir -p /tmp/xddq25
-          gh run download 35557024975 -n xddq-popup-probe-25 -D /tmp/xddq25
-          test -f /tmp/xddq25/storage_state.json
+          rm -rf /tmp/xddq26
+          mkdir -p /tmp/xddq26
+          gh run download 35558578808 -n xddq-popup-probe-26 -D /tmp/xddq26
+          test -f /tmp/xddq26/storage_state.json
       - run: python v2/probe_popup.py
-      - uses: actions/upload-artifact@v4
+      - name: Preserve auth state
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xddq-auth-state-${{ github.run_number }}
+          path: v2/popup-probe/storage_state.json
+          retention-days: 30
+      - name: Upload non-sensitive probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: xddq-popup-probe-${{ github.run_number }}
-          path: v2/popup-probe/
+          path: |
+            v2/popup-probe/*.png
+            v2/popup-probe/vision_events.json
           retention-days: 1

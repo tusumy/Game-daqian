@@ -6,7 +6,7 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq25/storage_state.json"
+AUTH="/tmp/xddq26/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
@@ -25,6 +25,14 @@ def best_match(img, tpl_path):
 def screenshot_img(page):
     raw=page.screenshot(full_page=True)
     return cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_COLOR)
+
+def reward_overlay_present(img):
+    # 洞府首次进入后可能弹“恭喜获得”奖励层。
+    # 识别中央金色横幅 + 下方亮色奖励卡，命中后仅点右侧暗背景关闭。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    gold=cv2.inRange(hsv[300:390,330:650],np.array([5,45,80]),np.array([40,255,255]))
+    bright=cv2.inRange(hsv[390:520,410:540],np.array([25,25,80]),np.array([110,255,255]))
+    return cv2.countNonZero(gold) > 2500 and cv2.countNonZero(bright) > 800
 
 def profile_overlay_present(img):
     # 点洞府后偶发“北斗星君 / 仙王后期 / 本次登录不再提示”覆盖层。
@@ -262,6 +270,15 @@ with sync_playwright() as p:
                     events.append({"t":round(time.time(),2),"action":"dongfu_retry","x":dp[0],"y":dp[1]})
                     print("[VISION]",events[-1],flush=True)
                     time.sleep(8)
+
+                # 洞府进入后若弹“恭喜获得”奖励层，点击右侧暗背景关闭。
+                img3=screenshot_img(page)
+                page.screenshot(path=str(OUT/"after_dongfu_before_reward_close.png"),full_page=True)
+                if reward_overlay_present(img3):
+                    page.mouse.click(690,420)
+                    events.append({"t":round(time.time(),2),"action":"dismiss_reward_overlay","x":690.0,"y":420.0})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(6)
                 clicked_dongfu=True
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
