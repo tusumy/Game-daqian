@@ -6,12 +6,11 @@ import recorder
 
 OUT=Path("v2/popup-probe")
 OUT.mkdir(parents=True,exist_ok=True)
-AUTH="/tmp/xddq17/storage_state.json"
+AUTH="/tmp/xddq18/storage_state.json"
 HOME_URL="https://www.wanyiwan.top/home"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
-    "continue": ("v2/templates/continue.png", 0.84),
     "dongfu": ("v2/templates/dongfu.png", 0.84),
 }
 
@@ -42,6 +41,35 @@ def enter_game_point(img):
     if score < 2200:
         return None
     return (480.0,790.0)
+
+def network_continue_point(img):
+    # “网络状况不佳”弹窗：左侧橙色“重启” + 右侧绿色“继续”同时存在。
+    # 只有两种色块同时命中才点击绿色按钮，避免把其它绿色按钮当成“继续”。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=250,520,720,680
+    roi=hsv[y0:y1,x0:x1]
+    green=cv2.inRange(roi,np.array([35,45,70]),np.array([100,255,255]))
+    orange=cv2.inRange(roi,np.array([0,70,90]),np.array([30,255,255]))
+
+    def largest(mask):
+        n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+        best=None
+        for i in range(1,n):
+            x,y,w,h,area=stats[i]
+            if area < 1200 or w < 70 or h < 25:
+                continue
+            if best is None or area>best[0]:
+                best=(area,(float(cent[i][0]+x0),float(cent[i][1]+y0)))
+        return best
+
+    g=largest(green)
+    o=largest(orange)
+    if not g or not o:
+        return None
+    # 绿色按钮应位于橙色按钮右侧。
+    if g[1][0] <= o[1][0]:
+        return None
+    return g[1]
 
 def connection_confirm_point(img):
     # “连接失败，返回登陆界面”的橙黄色“确定”按钮。
@@ -134,6 +162,17 @@ with sync_playwright() as p:
                 except Exception as e:
                     print("[!] 重连恢复失败:",repr(e),flush=True)
 
+        # “网络状况不佳”优先处理；弹窗存在时绝不去点背后的公告叉。
+        if not action and now-last_click.get("network_continue",0) >= 8:
+            npnt=network_continue_point(img)
+            if npnt:
+                page.mouse.click(npnt[0],npnt[1])
+                last_click["network_continue"]=now
+                action="network_continue"
+                events.append({"t":round(now,2),"action":"network_continue","x":round(npnt[0],1),"y":round(npnt[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(8)
+
         # 用户已明确授权个人信息保护提示。仅在检测到指定绿色按钮时点击一次。
         if not last_click.get("privacy_agree"):
             p=privacy_agree_point(img)
@@ -158,7 +197,7 @@ with sync_playwright() as p:
 
         # 之后再关其它弹窗、处理网络提示，最后进洞府。
         if not action:
-          for name in ("notice_x","event_x","continue","dongfu"):
+          for name in ("notice_x","event_x","dongfu"):
               info=matches.get(name)
               if not info or info["score"] < info["threshold"]:
                   continue
