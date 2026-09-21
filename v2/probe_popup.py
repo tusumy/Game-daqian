@@ -354,23 +354,43 @@ def modal_close_point(img):
     return best[1] if best else None
 
 def probe_existing_plant(page, events):
-    # 丹界验证成功后只收一株成熟灵植：先点成熟作物，再点弹出的左侧“收获”。
-    # 绝不点击右侧“一键收获”，避免一次性收掉全部药田。
-    x,y=451.0,526.0
-    page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
-    page.mouse.click(x,y)
-    events.append({"t":round(time.time(),2),"action":"mature_plant_probe_click","x":x,"y":y})
-    print("[VISION]",events[-1],flush=True)
-    time.sleep(3)
-    page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
+    # 最小范围验证“普通收获 + 拖动批量”：
+    # 先正常收一株，再只拖过相邻两格；绝不点击会员“一键收获”。
+    # 上一轮 (451,526) 已经收成空地，因此这次从它相邻的成熟格开始。
+    x,y=467.0,537.0
+    page.screenshot(path=str(OUT/"before_harvest_drag_probe.png"),full_page=True)
 
-    # 当前“特权”菜单：左侧“收获”按钮中心约在 (425,625)。
+    # 1) 点一株成熟作物，打开“特权 / 收获 / 一键收获”菜单。
+    page.mouse.click(x,y)
+    events.append({"t":round(time.time(),2),"action":"drag_probe_mature_click","x":x,"y":y})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(2)
+
+    # 2) 只点左侧普通“收获”，先收这一株。
     hx,hy=425.0,625.0
     page.mouse.click(hx,hy)
-    events.append({"t":round(time.time(),2),"action":"single_harvest_click","x":hx,"y":hy})
+    events.append({"t":round(time.time(),2),"action":"drag_probe_single_harvest","x":hx,"y":hy})
     print("[VISION]",events[-1],flush=True)
+    time.sleep(1.2)
+
+    # 3) 按住相邻成熟格，沿旧版药田网格只拖过两格。
+    #    网格相邻步长来自旧脚本：col += (16,11)。
+    p1=(483.0,548.0)
+    p2=(499.0,559.0)
+    page.mouse.move(p1[0],p1[1])
+    page.mouse.down()
+    time.sleep(0.6)
+    page.mouse.move(p2[0],p2[1],steps=10)
+    time.sleep(0.8)
+    page.mouse.up()
+    events.append({"t":round(time.time(),2),"action":"harvest_drag_probe",
+                   "from":[p1[0],p1[1]],"to":[p2[0],p2[1]]})
+    print("[VISION]",events[-1],flush=True)
+
     time.sleep(4)
-    page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
+    page.screenshot(path=str(OUT/"after_harvest_drag_probe.png"),full_page=True)
+
+
 
 
 with sync_playwright() as p:
