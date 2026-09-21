@@ -11,6 +11,8 @@ GAME_URL="https://www.wanyiwan.top/game/xddq"
 TEMPLATES={
     "notice_x": ("v2/templates/notice_x.png", 0.86),
     "event_x": ("v2/templates/event_x.png", 0.86),
+    "daily_no_remind": ("v2/templates/daily_no_remind.png", 0.78),
+    "officer_no_remind": ("v2/templates/officer_no_remind.png", 0.80),
 }
 
 def best_match(img, tpl_path):
