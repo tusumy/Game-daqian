@@ -19,10 +19,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Temporary guard for misfired legacy farm run
-        run: |
-          sleep 1000
-          exit 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
