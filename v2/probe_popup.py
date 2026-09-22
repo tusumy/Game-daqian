@@ -537,7 +537,7 @@ with sync_playwright() as p:
                     page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
                     events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                     print("[VISION]",events[-1],flush=True)
-                    page.screenshot(path=str(OUT/"baseline_danjie_verified.png"),full_page=True)
+                    probe_existing_plant(page,events)
                     clicked_dongfu=True
                 continue
 
@@ -662,7 +662,7 @@ with sync_playwright() as p:
                             page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
                             events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                             print("[VISION]",events[-1],flush=True)
-                            page.screenshot(path=str(OUT/"baseline_danjie_verified.png"),full_page=True)
+                            probe_existing_plant(page,events)
                             clicked_dongfu=True
                         break
 
