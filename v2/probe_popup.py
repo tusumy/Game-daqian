@@ -644,6 +644,28 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # 已知活动弹窗必须优先于“活动页/开场动画”处理。
+        # 先勾“今日不再提示”，再关 X，避免把弹窗里的金色元素误认成“跳过”。
+        if not action:
+            for pname in ("event_x","notice_x"):
+                info=matches.get(pname)
+                if not info or info["score"] < info["threshold"]:
+                    continue
+                chk=today_no_remind_point(img) if pname=="event_x" else None
+                if chk:
+                    page.mouse.click(chk[0],chk[1])
+                    time.sleep(0.8)
+                page.mouse.click(info["x"],info["y"])
+                last_click[pname]=now
+                action="outer_"+pname
+                events.append({"t":round(now,2),"action":"outer_"+pname,
+                               "score":round(info["score"],4),
+                               "x":round(info["x"],1),"y":round(info["y"],1),
+                               "today_no_remind":bool(chk)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(4)
+                break
+
         # 完整活动页若有左上返回箭头，永远优先返回；
         # 只有纯开场动画（没有返回箭头）才允许点右上“跳过»”。
         if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
@@ -839,6 +861,39 @@ with sync_playwright() as p:
                         events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_dismiss"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
+                        continue
+
+                    # 已知活动弹窗优先处理，不能让“返回/跳过”抢先误判。
+                    early_closed=False
+                    for pname in ("event_x","notice_x"):
+                        ppath,thr=TEMPLATES[pname]
+                        mm=best_match(shot,ppath)
+                        if mm and mm[0] >= thr:
+                            chk=today_no_remind_point(shot) if pname=="event_x" else None
+                            if chk:
+                                page.mouse.click(chk[0],chk[1])
+                                time.sleep(0.8)
+                            before_close=screenshot_img(page)
+                            page.mouse.click(mm[1][0],mm[1][1])
+                            clear_count+=1
+                            clean_frames=0
+                            time.sleep(2)
+                            after_close=screenshot_img(page)
+                            change=scene_change_score(before_close,after_close)
+                            events.append({"t":round(time.time(),2),"action":"post_dongfu_priority_"+pname,
+                                           "score":round(float(mm[0]),4),
+                                           "x":round(float(mm[1][0]),1),"y":round(float(mm[1][1]),1),
+                                           "today_no_remind":bool(chk),"scene_change":round(change,2)})
+                            print("[VISION]",events[-1],flush=True)
+                            if change < 2.0:
+                                page.screenshot(path=str(OUT/"stuck_priority_event_close.png"),full_page=True)
+                                abort_reason=f"{pname} 优先关闭后画面未变化"
+                            early_closed=True
+                            break
+                    if abort_reason:
+                        break
+                    if early_closed:
+                        time.sleep(3)
                         continue
 
                     # 完整活动页若有左上返回箭头，永远优先返回。
