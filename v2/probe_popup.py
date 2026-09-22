@@ -440,7 +440,7 @@ def empty_plot_candidates(img):
     frac=cv2.boxFilter(tan.astype(np.float32)/255.0,-1,(36,18),normalize=True)
 
     raw=[]
-    for y in range(465,601,2):
+    for y in range(465,661,2):
         for x in range(275,691,2):
             score=float(frac[y,x])
             if score >= 0.78:
@@ -451,7 +451,7 @@ def empty_plot_candidates(img):
     for score,x,y in raw:
         if all((x-ox)**2+(y-oy)**2 > 25**2 for _,ox,oy in out):
             out.append((score,x,y))
-        if len(out) >= 20:
+        if len(out) >= 36:
             break
     return out
 
