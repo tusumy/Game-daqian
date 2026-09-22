@@ -350,14 +350,13 @@ def nested_intro_skip_point(img):
 
 
 def nested_page_back_point(img):
-    # “天魔古域”等完整活动页不是弹窗，左上角有青白色返回箭头。
-    # 这类页面若误入，直接返回主界面再继续洞府流程。
+    # 完整活动页左上角的青白色返回箭头。
+    # 真箭头中心稳定在 x≈255,y≈116，组件约 37x23；主页蘑菇高光会偏到 x≈269。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     x0,y0,x1,y1=235,95,300,145
     roi=hsv[y0:y1,x0:x1]
     if roi.size == 0:
         return None
-    # 兼容青色/浅白箭头
     cyan=cv2.inRange(roi,np.array([75,20,130]),np.array([110,255,255]))
     pale=cv2.inRange(roi,np.array([0,0,180]),np.array([180,90,255]))
     mask=cv2.bitwise_or(cyan,pale)
@@ -366,14 +365,14 @@ def nested_page_back_point(img):
     for i in range(1,n):
         x,y,w,h,area=stats[i]
         cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        if area < 80 or w < 18 or h < 10:
+        ratio=w/float(max(1,h))
+        if not (250 <= area <= 900 and 28 <= w <= 50 and 16 <= h <= 32 and 1.2 <= ratio <= 2.8):
             continue
-        if not (245 <= cx <= 275 and 105 <= cy <= 135):
+        if not (244 <= cx <= 264 and 106 <= cy <= 126):
             continue
         if best is None or area > best[0]:
             best=(area,(cx,cy))
     return best[1] if best else None
-
 
 def promo_yellow_x_point(img):
     # “高额返利/充值”类推广弹窗：关闭键是右上偏下的黄色 X，
@@ -670,14 +669,27 @@ with sync_playwright() as p:
         # 只有纯开场动画（没有返回箭头）才允许点右上“跳过»”。
         if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
             bp=nested_page_back_point(img)
-            if bp:
+            if bp and now-last_click.get("nested_back_false",0) >= 20:
+                before_back=img
                 page.mouse.click(bp[0],bp[1])
-                last_click["nested_back"]=now
-                action="nested_page_back"
-                events.append({"t":round(now,2),"action":"nested_page_back",
-                               "x":round(bp[0],1),"y":round(bp[1],1)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(5)
+                time.sleep(2)
+                after_back=screenshot_img(page)
+                change=scene_change_score(before_back,after_back)
+                if change >= 2.0:
+                    last_click["nested_back"]=now
+                    action="nested_page_back"
+                    events.append({"t":round(now,2),"action":"nested_page_back",
+                                   "x":round(bp[0],1),"y":round(bp[1],1),
+                                   "scene_change":round(change,2)})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(3)
+                else:
+                    last_click["nested_back_false"]=now
+                    events.append({"t":round(now,2),"action":"nested_back_false_positive",
+                                   "x":round(bp[0],1),"y":round(bp[1],1),
+                                   "scene_change":round(change,2)})
+                    print("[VISION]",events[-1],flush=True)
+                    page.screenshot(path=str(OUT/"nested_back_false_positive.png"),full_page=True)
 
         if not action and not nested_page_back_point(img):
             sk=nested_intro_skip_point(img)
@@ -898,16 +910,28 @@ with sync_playwright() as p:
 
                     # 完整活动页若有左上返回箭头，永远优先返回。
                     bp=nested_page_back_point(shot)
-                    if bp:
+                    if bp and time.time()-last_click.get("nested_back_false",0) >= 20:
+                        before_back=shot
                         page.mouse.click(bp[0],bp[1])
-                        last_click["nested_back"]=time.time()
-                        clear_count+=1
-                        clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
-                                       "x":round(bp[0],1),"y":round(bp[1],1)})
+                        time.sleep(2)
+                        after_back=screenshot_img(page)
+                        change=scene_change_score(before_back,after_back)
+                        if change >= 2.0:
+                            last_click["nested_back"]=time.time()
+                            clear_count+=1
+                            clean_frames=0
+                            events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
+                                           "x":round(bp[0],1),"y":round(bp[1],1),
+                                           "scene_change":round(change,2)})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(3)
+                            continue
+                        last_click["nested_back_false"]=time.time()
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back_false_positive",
+                                       "x":round(bp[0],1),"y":round(bp[1],1),
+                                       "scene_change":round(change,2)})
                         print("[VISION]",events[-1],flush=True)
-                        time.sleep(5)
-                        continue
+                        page.screenshot(path=str(OUT/"post_dongfu_nested_back_false_positive.png"),full_page=True)
 
                     # 只有没有返回箭头的纯开场动画，才点右上“跳过»”。
                     sk=nested_intro_skip_point(shot)
