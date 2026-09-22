@@ -433,6 +433,112 @@ def harvest_popup_point(img):
     return (x+0.28*w, y+0.57*h)
 
 
+def empty_plot_candidates(img):
+    # 空地是浅棕色裸地。用局部棕色占比找地块中心，不依赖固定 36 格坐标。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    tan=cv2.inRange(hsv,np.array([15,45,120]),np.array([35,190,245]))
+    frac=cv2.boxFilter(tan.astype(np.float32)/255.0,-1,(36,18),normalize=True)
+
+    raw=[]
+    for y in range(465,601,2):
+        for x in range(275,691,2):
+            score=float(frac[y,x])
+            if score >= 0.78:
+                raw.append((score,float(x),float(y)))
+    raw.sort(reverse=True)
+
+    out=[]
+    for score,x,y in raw:
+        if all((x-ox)**2+(y-oy)**2 > 25**2 for _,ox,oy in out):
+            out.append((score,x,y))
+        if len(out) >= 20:
+            break
+    return out
+
+
+def plant_panel_present(img):
+    # 点空地后，下半部会出现大块深色“灵植/进化灵植”选择面板。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    roi=hsv[560:860,240:705]
+    if roi.size == 0:
+        return False
+    dark=cv2.inRange(roi,np.array([0,0,0]),np.array([180,255,155]))
+    frac=cv2.countNonZero(dark)/float(roi.shape[0]*roi.shape[1])
+    return frac >= 0.55
+
+
+def tan_score_at(img,x,y):
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    tan=cv2.inRange(hsv,np.array([15,45,120]),np.array([35,190,245]))
+    x=int(round(x)); y=int(round(y))
+    x0=max(0,x-18); x1=min(tan.shape[1],x+18)
+    y0=max(0,y-9); y1=min(tan.shape[0],y+9)
+    roi=tan[y0:y1,x0:x1]
+    if roi.size == 0:
+        return 0.0
+    return cv2.countNonZero(roi)/float(roi.shape[0]*roi.shape[1])
+
+
+def probe_one_plant(page, events):
+    # 先只补 1 块空地，验证“空地 -> 选灵植 -> 进入种植状态”。
+    before=screenshot_img(page)
+    empties=empty_plot_candidates(before)
+    if not empties:
+        events.append({"t":round(time.time(),2),"action":"plant_skip","reason":"no_empty_plot"})
+        print("[VISION]",events[-1],flush=True)
+        return
+
+    score,x,y=empties[0]
+    before_tan=tan_score_at(before,x,y)
+    page.screenshot(path=str(OUT/"before_one_plant.png"),full_page=True)
+    page.mouse.click(x,y)
+    events.append({"t":round(time.time(),2),"action":"empty_plot_click",
+                   "x":round(x,1),"y":round(y,1),"tan_score":round(before_tan,3)})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(2)
+
+    panel=screenshot_img(page)
+    if not plant_panel_present(panel):
+        page.screenshot(path=str(OUT/"plant_panel_missing.png"),full_page=True)
+        raise RuntimeError("识别到空地并点击，但未出现灵植选择面板")
+
+    page.screenshot(path=str(OUT/"plant_panel_verified.png"),full_page=True)
+
+    # 面板第一页任选已解锁灵植。使用第二张卡“冰凤羽草”附近中心，
+    # 避开标签、分页和“一键种植”开关。
+    page.mouse.click(377,687)
+    events.append({"t":round(time.time(),2),"action":"plant_choice_click",
+                   "x":377.0,"y":687.0})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(2)
+
+    # 某些交互是“选中后立即种当前地”，某些需要再点一次地块。
+    mid=screenshot_img(page)
+    if plant_panel_present(mid):
+        page.mouse.click(x,y)
+        events.append({"t":round(time.time(),2),"action":"plant_target_after_choice",
+                       "x":round(x,1),"y":round(y,1)})
+        print("[VISION]",events[-1],flush=True)
+        time.sleep(3)
+    else:
+        time.sleep(2)
+
+    after=screenshot_img(page)
+    after_tan=tan_score_at(after,x,y)
+    page.screenshot(path=str(OUT/"after_one_plant.png"),full_page=True)
+    events.append({"t":round(time.time(),2),"action":"one_plant_verified",
+                   "x":round(x,1),"y":round(y,1),
+                   "before_tan":round(before_tan,3),
+                   "after_tan":round(after_tan,3)})
+    print("[VISION]",events[-1],flush=True)
+
+    # 裸地被植株覆盖后，局部浅棕占比应该明显下降。
+    if after_tan > before_tan-0.18:
+        raise RuntimeError(
+            f"补种未验证成功：目标地块棕色占比 {before_tan:.2f} -> {after_tan:.2f}"
+        )
+
+
 def probe_existing_plant(page, events):
     # 稳妥方案：逐株普通收获，最多 36 株。
     # 不再尝试拖动；每株都验证“成熟候选 -> 特权菜单 -> 左侧收获 -> 原亮点消失”。
@@ -534,6 +640,7 @@ def probe_existing_plant(page, events):
                    "harvested":harvested,"max_harvest":max_harvest,
                    "ignored_spots":len(bad_spots)})
     print("[VISION]",events[-1],flush=True)
+    probe_one_plant(page,events)
 
 
 with sync_playwright() as p:
