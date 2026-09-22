@@ -634,18 +634,8 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
-        # 完整活动开场动画优先点右上“跳过»”。
-        if not action:
-            sk=nested_intro_skip_point(img)
-            if sk:
-                page.mouse.click(sk[0],sk[1])
-                action="nested_intro_skip"
-                events.append({"t":round(now,2),"action":"nested_intro_skip",
-                               "x":sk[0],"y":sk[1]})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(6)
-
-        # 若误入“天魔古域”等完整活动页，优先点左上返回箭头。
+        # 完整活动页若有左上返回箭头，永远优先返回；
+        # 只有纯开场动画（没有返回箭头）才允许点右上“跳过»”。
         if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
             bp=nested_page_back_point(img)
             if bp:
@@ -655,6 +645,16 @@ with sync_playwright() as p:
                                "x":round(bp[0],1),"y":round(bp[1],1)})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(5)
+
+        if not action and not nested_page_back_point(img):
+            sk=nested_intro_skip_point(img)
+            if sk:
+                page.mouse.click(sk[0],sk[1])
+                action="nested_intro_skip"
+                events.append({"t":round(now,2),"action":"nested_intro_skip",
+                               "x":sk[0],"y":sk[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(6)
 
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
@@ -809,19 +809,7 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
-                    # 完整活动开场动画先点右上“跳过»”。
-                    sk=nested_intro_skip_point(shot)
-                    if sk:
-                        page.mouse.click(sk[0],sk[1])
-                        clear_count+=1
-                        clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_intro_skip",
-                                       "x":sk[0],"y":sk[1]})
-                        print("[VISION]",events[-1],flush=True)
-                        time.sleep(6)
-                        continue
-
-                    # 完整活动页（如“天魔古域”）不是资料覆盖层；先走左上返回。
+                    # 完整活动页若有左上返回箭头，永远优先返回。
                     bp=nested_page_back_point(shot)
                     if bp:
                         page.mouse.click(bp[0],bp[1])
@@ -831,6 +819,18 @@ with sync_playwright() as p:
                                        "x":round(bp[0],1),"y":round(bp[1],1)})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(5)
+                        continue
+
+                    # 只有没有返回箭头的纯开场动画，才点右上“跳过»”。
+                    sk=nested_intro_skip_point(shot)
+                    if sk:
+                        page.mouse.click(sk[0],sk[1])
+                        clear_count+=1
+                        clean_frames=0
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_intro_skip",
+                                       "x":sk[0],"y":sk[1]})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(6)
                         continue
 
                     # 资料提示层：点旁边暗处。
