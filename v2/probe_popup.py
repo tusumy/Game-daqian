@@ -93,25 +93,26 @@ def dongfu_menu_danjie_point(img):
 
 
 def danjie_page_present(img):
-    # 丹界药田页面中央大面积为青绿山水/药田，修罗战场、活动海报、主界面都不满足。
+    # 真丹界中央药田有大量偏绿植被（HSV H≈35..80）；
+    # 东海寻珍虽同样青蓝，但主体 H≈80..120，不能再混为一谈。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     roi=hsv[180:760,228:712]
     if roi.size == 0:
         return None
-    green=cv2.inRange(roi,np.array([35,35,50]),np.array([100,255,255]))
-    frac=cv2.countNonZero(green)/float(roi.shape[0]*roi.shape[1])
-    if frac < 0.45:
+
+    farm_green=cv2.inRange(roi,np.array([35,35,50]),np.array([80,255,255]))
+    green_frac=cv2.countNonZero(farm_green)/float(roi.shape[0]*roi.shape[1])
+    if green_frac < 0.32:
         return None
 
-    # 再要求顶部丹界区域也有明显青绿色背景，降低主界面误判。
+    # 顶部仍要求有青绿色背景，避免其它纯绿色页面误判。
     top=hsv[95:150,228:500]
     teal=cv2.inRange(top,np.array([60,20,40]),np.array([110,255,255]))
     top_frac=cv2.countNonZero(teal)/float(top.shape[0]*top.shape[1])
     if top_frac < 0.30:
         return None
 
-    return (frac,top_frac)
-
+    return (green_frac,top_frac)
 def enter_game_point(img):
     # “踏入仙途”只出现在启动画面的下部中间。
     h,w=img.shape[:2]
@@ -684,7 +685,6 @@ with sync_playwright() as p:
         # 不做“跳过/重载/活动堆栈”推断，避免再次把主线绕坏。
         if (not action and not main_dongfu_point(img)
                 and not dongfu_menu_danjie_point(img)
-                and not danjie_page_present(img)
                 and now-last_click.get("activity_back",0) >= 8):
             bp=nested_page_back_point(img)
             if bp:
