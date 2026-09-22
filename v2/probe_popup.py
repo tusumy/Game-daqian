@@ -433,96 +433,104 @@ def harvest_popup_point(img):
 
 
 def probe_existing_plant(page, events):
-    # 真正按游戏交互做：只点一次普通“收获”，随后按住拖过整片药田。
-    # 通过拖动前后成熟亮点的变化，验证是否真的批量收获。
-    page.screenshot(path=str(OUT/"before_drag_harvest.png"),full_page=True)
-    before=screenshot_img(page)
-    initial=mature_candidate_points(before)
-    if not initial:
-        raise RuntimeError("丹界已进入，但没有识别到成熟灵植")
+    # 稳妥方案：逐株普通收获，最多 36 株。
+    # 不再尝试拖动；每株都验证“成熟候选 -> 特权菜单 -> 左侧收获 -> 原亮点消失”。
+    max_harvest=36
+    harvested=0
+    bad_spots=[]
+    page.screenshot(path=str(OUT/"before_full_harvest.png"),full_page=True)
 
-    # 先找一株能稳定弹出“特权”收获菜单的成熟株。
-    chosen=None
-    harvest_btn=None
-    for idx,(x,y,area) in enumerate(initial[:8],start=1):
-        page.mouse.click(float(x),float(y))
-        events.append({"t":round(time.time(),2),"action":"drag_seed_candidate_click",
-                       "candidate":idx,"x":round(float(x),1),"y":round(float(y),1),
-                       "area":int(area)})
-        print("[VISION]",events[-1],flush=True)
-        time.sleep(2)
+    def near_bad(x,y):
+        return any((x-bx)**2+(y-by)**2 <= 14**2 for bx,by in bad_spots)
 
-        menu_img=screenshot_img(page)
-        hp=harvest_popup_point(menu_img)
-        if hp:
-            chosen=(float(x),float(y),idx)
-            harvest_btn=(float(hp[0]),float(hp[1]))
-            page.screenshot(path=str(OUT/"drag_harvest_menu_verified.png"),full_page=True)
+    while harvested < max_harvest:
+        before=screenshot_img(page)
+        candidates=[
+            p for p in mature_candidate_points(before)
+            if not near_bad(float(p[0]),float(p[1]))
+        ]
+
+        if not candidates:
+            events.append({"t":round(time.time(),2),"action":"full_harvest_complete",
+                           "harvested":harvested,"reason":"no_more_candidates"})
+            print("[VISION]",events[-1],flush=True)
             break
 
-        # 点到空地/装饰时，点农田外空白收掉面板再试。
-        page.mouse.click(690,450)
-        time.sleep(2)
+        round_success=False
 
-    if not chosen or not harvest_btn:
-        raise RuntimeError("成熟候选中没有找到可进入普通收获状态的灵植")
+        # 每轮最多试前 12 个亮点；不是成熟株菜单的亮点记入 bad_spots。
+        for idx,(x,y,area) in enumerate(candidates[:12],start=1):
+            x=float(x); y=float(y)
+            page.mouse.click(x,y)
+            events.append({"t":round(time.time(),2),"action":"mature_candidate_click",
+                           "harvest_no":harvested+1,"candidate":idx,
+                           "x":round(x,1),"y":round(y,1),"area":int(area)})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(1.2)
 
-    # 只点一次左侧普通“收获”，绝不碰右侧 VIP“一键收获”。
-    page.mouse.click(harvest_btn[0],harvest_btn[1])
-    events.append({"t":round(time.time(),2),"action":"enter_drag_harvest_mode",
-                   "candidate":chosen[2],
-                   "x":round(harvest_btn[0],1),"y":round(harvest_btn[1],1)})
+            menu_img=screenshot_img(page)
+            hp=harvest_popup_point(menu_img)
+            if not hp:
+                bad_spots.append((x,y))
+                page.mouse.click(690,450)
+                time.sleep(0.8)
+                continue
+
+            # 只点左侧普通“收获”；右侧 VIP“一键收获”绝不点击。
+            hx=float(hp[0]); hy=float(hp[1])
+            page.mouse.click(hx,hy)
+            events.append({"t":round(time.time(),2),"action":"single_harvest_click",
+                           "harvest_no":harvested+1,"candidate":idx,
+                           "x":round(hx,1),"y":round(hy,1)})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(2.2)
+
+            after=screenshot_img(page)
+            remaining=mature_candidate_points(after)
+            still_here=any((float(px)-x)**2+(float(py)-y)**2 <= 12**2
+                           for px,py,_ in remaining)
+
+            # 动画偶尔慢一拍；若亮点还在，再等一次再判断。
+            if still_here:
+                time.sleep(1.5)
+                after=screenshot_img(page)
+                remaining=mature_candidate_points(after)
+                still_here=any((float(px)-x)**2+(float(py)-y)**2 <= 12**2
+                               for px,py,_ in remaining)
+
+            events.append({"t":round(time.time(),2),"action":"single_harvest_verified",
+                           "harvest_no":harvested+1,"candidate":idx,
+                           "bright_point_removed":not still_here})
+            print("[VISION]",events[-1],flush=True)
+
+            if still_here:
+                page.screenshot(path=str(OUT/"harvest_verify_failed.png"),full_page=True)
+                raise RuntimeError(
+                    f"第 {harvested+1} 株点击普通收获后成熟亮点仍在，停止继续"
+                )
+
+            harvested+=1
+            round_success=True
+
+            if harvested % 5 == 0:
+                page.screenshot(path=str(OUT/f"harvest_progress_{harvested}.png"),full_page=True)
+            break
+
+        if not round_success:
+            # 剩下的亮点都不能打开“特权”收获菜单，视为没有可收成熟株。
+            page.screenshot(path=str(OUT/"no_more_valid_harvest_menu.png"),full_page=True)
+            events.append({"t":round(time.time(),2),"action":"full_harvest_complete",
+                           "harvested":harvested,
+                           "reason":"remaining_bright_spots_not_harvestable",
+                           "ignored_spots":len(bad_spots)})
+            print("[VISION]",events[-1],flush=True)
+            break
+
+    page.screenshot(path=str(OUT/"after_full_harvest.png"),full_page=True)
+    events.append({"t":round(time.time(),2),"action":"full_harvest_summary",
+                   "harvested":harvested,"max_harvest":max_harvest,
+                   "ignored_spots":len(bad_spots)})
     print("[VISION]",events[-1],flush=True)
-    time.sleep(2)
-
-    after_first=screenshot_img(page)
-    remaining=mature_candidate_points(after_first)
-    if not remaining:
-        page.screenshot(path=str(OUT/"after_drag_harvest.png"),full_page=True)
-        events.append({"t":round(time.time(),2),"action":"drag_harvest_verified",
-                       "initial_count":len(initial),"after_count":0,
-                       "removed_count":len(initial)})
-        print("[VISION]",events[-1],flush=True)
-        return
-
-    # 从仍然存在的一株成熟灵植开始按住，再用蛇形轨迹扫过整个药田。
-    sx,sy,_=remaining[0]
-    page.mouse.move(float(sx),float(sy))
-    page.mouse.down()
-
-    # 药田成熟区大致落在 x=300..665, y=485..640。
-    # 每隔约 18px 扫一行，足以经过 36 个地块，不需要逐格点击。
-    rows=list(range(490,641,18))
-    for ri,yy in enumerate(rows):
-        if ri % 2 == 0:
-            xs=range(305,666,18)
-        else:
-            xs=range(665,304,-18)
-        for xx in xs:
-            page.mouse.move(float(xx),float(yy),steps=2)
-    page.mouse.up()
-    time.sleep(5)
-
-    after=screenshot_img(page)
-    page.screenshot(path=str(OUT/"after_drag_harvest.png"),full_page=True)
-    final=mature_candidate_points(after)
-
-    removed=0
-    for x,y,_ in initial:
-        if not any((px-x)**2+(py-y)**2 <= 12**2 for px,py,_ in final):
-            removed+=1
-
-    events.append({"t":round(time.time(),2),"action":"drag_harvest_verified",
-                   "initial_count":len(initial),
-                   "after_count":len(final),
-                   "removed_count":removed})
-    print("[VISION]",events[-1],flush=True)
-
-    # 至少消失 3 个成熟亮点，才证明拖动确实比单株收获多收了。
-    if removed < min(3,len(initial)):
-        raise RuntimeError(
-            f"拖动未证明批量收获：拖前 {len(initial)} 个成熟亮点，拖后 {len(final)} 个，仅消失 {removed} 个"
-        )
 
 
 with sync_playwright() as p:
