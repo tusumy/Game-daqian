@@ -433,50 +433,70 @@ def harvest_popup_point(img):
 
 
 def probe_existing_plant(page, events):
-    # 只收一株，并且要求“成熟亮点 -> 特权菜单 -> 亮点消失”三段都验证通过。
+    # 小批量验证：连续收 3 株。每一株都必须经过
+    # “成熟亮点 -> 特权菜单 -> 左侧普通收获 -> 原亮点消失”四步确认。
+    target_count=3
+    harvested=0
     page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
-    before=screenshot_img(page)
-    candidates=mature_candidate_points(before)
-    if not candidates:
-        page.screenshot(path=str(OUT/"no_mature_candidate.png"),full_page=True)
-        raise RuntimeError("丹界已进入，但没有识别到成熟灵植亮点")
 
-    # 先试最可信的前 6 个成熟候选；未出现特权菜单就换下一株。
-    for idx,(x,y,area) in enumerate(candidates[:6],start=1):
-        page.mouse.click(x,y)
-        events.append({"t":round(time.time(),2),"action":"mature_candidate_click",
-                       "candidate":idx,"x":round(x,1),"y":round(y,1),"area":int(area)})
-        print("[VISION]",events[-1],flush=True)
-        time.sleep(2)
+    while harvested < target_count:
+        round_no=harvested+1
+        before=screenshot_img(page)
+        candidates=mature_candidate_points(before)
+        if not candidates:
+            page.screenshot(path=str(OUT/f"no_mature_candidate_round_{round_no}.png"),full_page=True)
+            raise RuntimeError(f"已成功收获 {harvested} 株，但第 {round_no} 株时没有识别到成熟灵植亮点")
 
-        menu_img=screenshot_img(page)
-        hp=harvest_popup_point(menu_img)
-        if not hp:
-            # 不是成熟株菜单时点农田上方空白收掉当前层，再试下一候选。
-            page.mouse.click(690,450)
+        round_success=False
+
+        # 每轮只试最可信的前 8 个候选；点错空地/装饰时关掉面板继续换下一株。
+        for idx,(x,y,area) in enumerate(candidates[:8],start=1):
+            page.mouse.click(x,y)
+            events.append({"t":round(time.time(),2),"action":"mature_candidate_click",
+                           "harvest_round":round_no,"candidate":idx,
+                           "x":round(x,1),"y":round(y,1),"area":int(area)})
+            print("[VISION]",events[-1],flush=True)
             time.sleep(2)
-            continue
 
-        page.screenshot(path=str(OUT/"harvest_menu_verified.png"),full_page=True)
-        page.mouse.click(hp[0],hp[1])
-        events.append({"t":round(time.time(),2),"action":"single_harvest_click",
-                       "x":round(hp[0],1),"y":round(hp[1],1),"candidate":idx})
-        print("[VISION]",events[-1],flush=True)
-        time.sleep(4)
+            menu_img=screenshot_img(page)
+            hp=harvest_popup_point(menu_img)
+            if not hp:
+                page.mouse.click(690,450)
+                time.sleep(2)
+                continue
 
-        after=screenshot_img(page)
-        page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
-        remaining=mature_candidate_points(after)
-        still_here=any((px-x)**2+(py-y)**2 <= 12**2 for px,py,_ in remaining)
-        events.append({"t":round(time.time(),2),"action":"single_harvest_verified",
-                       "candidate":idx,"bright_point_removed":not still_here})
-        print("[VISION]",events[-1],flush=True)
-        if still_here:
-            raise RuntimeError("已点击普通收获，但成熟灵植亮点仍在，不能判定收获成功")
-        return
+            page.screenshot(path=str(OUT/f"harvest_menu_verified_{round_no}.png"),full_page=True)
+            page.mouse.click(hp[0],hp[1])
+            events.append({"t":round(time.time(),2),"action":"single_harvest_click",
+                           "harvest_round":round_no,"candidate":idx,
+                           "x":round(hp[0],1),"y":round(hp[1],1)})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(4)
 
-    page.screenshot(path=str(OUT/"no_harvest_menu_from_candidates.png"),full_page=True)
-    raise RuntimeError("识别到成熟候选，但前 6 个都没有出现特权收获菜单")
+            after=screenshot_img(page)
+            page.screenshot(path=str(OUT/f"after_single_harvest_{round_no}.png"),full_page=True)
+            remaining=mature_candidate_points(after)
+            still_here=any((px-x)**2+(py-y)**2 <= 12**2 for px,py,_ in remaining)
+            events.append({"t":round(time.time(),2),"action":"single_harvest_verified",
+                           "harvest_round":round_no,"candidate":idx,
+                           "bright_point_removed":not still_here})
+            print("[VISION]",events[-1],flush=True)
+
+            if still_here:
+                raise RuntimeError(f"第 {round_no} 株已点击普通收获，但成熟亮点仍在")
+
+            harvested+=1
+            round_success=True
+            break
+
+        if not round_success:
+            page.screenshot(path=str(OUT/f"no_harvest_menu_round_{round_no}.png"),full_page=True)
+            raise RuntimeError(f"第 {round_no} 轮前 8 个成熟候选都没有出现特权收获菜单")
+
+    page.screenshot(path=str(OUT/"after_three_harvests.png"),full_page=True)
+    events.append({"t":round(time.time(),2),"action":"three_harvests_verified",
+                   "count":harvested})
+    print("[VISION]",events[-1],flush=True)
 
 
 with sync_playwright() as p:
