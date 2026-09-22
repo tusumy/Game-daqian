@@ -374,60 +374,78 @@ def modal_close_point(img):
             best=(area,(cx,cy))
     return best[1] if best else None
 
-def probe_existing_plant(page, events):
-    # 真正验证“普通收获 + 拖动批量”：
-    # 不再使用固定收获按钮坐标，先用仓库现有 shouhuo_btn.png 确认并点中普通“收获”。
-    # 只有按钮确认点击成功后，才按住相邻成熟格拖过两格。
-    start=(403.0,537.0)
-    drag1=(419.0,548.0)
-    drag2=(435.0,559.0)
+def harvest_button_point(img):
+    # 当前“特权”菜单左侧普通收获按钮里有一只粉色手掌。
+    # 菜单会随所点地块上下移动，所以不再写死 y，也不依赖旧版按钮模板。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=360,540,470,735
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    warm=cv2.inRange(roi,np.array([0,30,80]),np.array([25,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(warm)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (350 <= area <= 1400 and 30 <= w <= 60 and 20 <= h <= 45):
+            continue
+        if not (390 <= cx <= 440 and 575 <= cy <= 700):
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
 
-    page.screenshot(path=str(OUT/"before_harvest_drag_exact.png"),full_page=True)
+
+def probe_existing_plant(page, events):
+    # 选当前截图右上三格仍明确成熟的灵植做最小拖动验证。
+    # 先动态找左侧普通“收获”手掌按钮；只有命中后才执行拖动。
+    start=(568.0,520.0)
+    drag1=(584.0,531.0)
+    drag2=(600.0,542.0)
+
+    page.screenshot(path=str(OUT/"before_harvest_drag_live.png"),full_page=True)
 
     # 1) 点成熟作物，打开“特权 / 收获 / 一键收获”菜单。
     page.mouse.click(start[0],start[1])
-    events.append({"t":round(time.time(),2),"action":"drag_exact_mature_click",
+    events.append({"t":round(time.time(),2),"action":"drag_live_mature_click",
                    "x":start[0],"y":start[1]})
     print("[VISION]",events[-1],flush=True)
     time.sleep(2)
 
-    # 2) 用旧版已经验证过的“收获”按钮模板定位左侧普通收获。
+    # 2) 动态找粉色手掌所在的普通“收获”按钮。
     menu_img=screenshot_img(page)
-    hm=best_match(menu_img,"shouhuo_btn.png")
-    if not hm or hm[0] < 0.72:
-        page.screenshot(path=str(OUT/"harvest_button_not_found.png"),full_page=True)
-        score=None if not hm else round(float(hm[0]),4)
-        events.append({"t":round(time.time(),2),"action":"harvest_button_not_found",
-                       "score":score})
+    hp=harvest_button_point(menu_img)
+    if not hp:
+        page.screenshot(path=str(OUT/"harvest_button_visual_not_found.png"),full_page=True)
+        events.append({"t":round(time.time(),2),"action":"harvest_button_visual_not_found"})
         print("[VISION]",events[-1],flush=True)
-        raise RuntimeError(f"成熟灵植菜单已打开，但普通收获按钮模板未命中: {score}")
+        raise RuntimeError("成熟灵植菜单已打开，但未识别到普通收获的粉色手掌按钮")
 
-    hx,hy=hm[1]
-    page.mouse.click(hx,hy)
-    events.append({"t":round(time.time(),2),"action":"harvest_button_exact_click",
-                   "score":round(float(hm[0]),4),
-                   "x":round(float(hx),1),"y":round(float(hy),1)})
+    page.mouse.click(hp[0],hp[1])
+    events.append({"t":round(time.time(),2),"action":"harvest_button_visual_click",
+                   "x":round(hp[0],1),"y":round(hp[1],1)})
     print("[VISION]",events[-1],flush=True)
     time.sleep(1.2)
 
-    # 3) 点击普通“收获”后进入收获状态，从相邻成熟格按住拖过两格。
+    # 3) 进入普通收获状态后，从相邻成熟格按住拖到下一格。
     page.mouse.move(drag1[0],drag1[1])
     page.mouse.down()
     time.sleep(0.7)
-    page.mouse.move(drag2[0],drag2[1],steps=16)
+    page.mouse.move(drag2[0],drag2[1],steps=18)
     time.sleep(1.0)
     page.mouse.up()
-    events.append({"t":round(time.time(),2),"action":"harvest_drag_exact",
+    events.append({"t":round(time.time(),2),"action":"harvest_drag_live",
                    "from":[drag1[0],drag1[1]],"to":[drag2[0],drag2[1]]})
     print("[VISION]",events[-1],flush=True)
 
     time.sleep(3)
-    page.screenshot(path=str(OUT/"after_harvest_drag_exact_with_panel.png"),full_page=True)
+    page.screenshot(path=str(OUT/"after_harvest_drag_live_with_panel.png"),full_page=True)
 
-    # 4) 点上方空白处收掉可能残留的菜单，再拍整片药田用于数空格。
+    # 4) 点击远离药田的山景空白处，收掉可能残留面板，再拍全田。
     page.mouse.click(690.0,430.0)
     time.sleep(2)
-    page.screenshot(path=str(OUT/"after_harvest_drag_exact.png"),full_page=True)
+    page.screenshot(path=str(OUT/"after_harvest_drag_live.png"),full_page=True)
 
 
 
