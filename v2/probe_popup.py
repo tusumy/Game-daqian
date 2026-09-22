@@ -640,6 +640,7 @@ with sync_playwright() as p:
             bp=nested_page_back_point(img)
             if bp:
                 page.mouse.click(bp[0],bp[1])
+                last_click["nested_back"]=now
                 action="nested_page_back"
                 events.append({"t":round(now,2),"action":"nested_page_back",
                                "x":round(bp[0],1),"y":round(bp[1],1)})
@@ -649,12 +650,23 @@ with sync_playwright() as p:
         if not action and not nested_page_back_point(img):
             sk=nested_intro_skip_point(img)
             if sk:
-                page.mouse.click(sk[0],sk[1])
-                action="nested_intro_skip"
-                events.append({"t":round(now,2),"action":"nested_intro_skip",
-                               "x":sk[0],"y":sk[1]})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(6)
+                if now-last_click.get("nested_back",0) < 20:
+                    page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+                    last_click.pop("nested_back",None)
+                    last_click.pop("notice_closed_at",None)
+                    last_click.pop("enter_after_notice",None)
+                    danjie_entry_clicked=False
+                    action="activity_stack_relaunch"
+                    events.append({"t":round(now,2),"action":"activity_stack_relaunch","url":page.url})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(12)
+                else:
+                    page.mouse.click(sk[0],sk[1])
+                    action="nested_intro_skip"
+                    events.append({"t":round(now,2),"action":"nested_intro_skip",
+                                   "x":sk[0],"y":sk[1]})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(6)
 
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
@@ -813,6 +825,7 @@ with sync_playwright() as p:
                     bp=nested_page_back_point(shot)
                     if bp:
                         page.mouse.click(bp[0],bp[1])
+                        last_click["nested_back"]=time.time()
                         clear_count+=1
                         clean_frames=0
                         events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
@@ -824,6 +837,17 @@ with sync_playwright() as p:
                     # 只有没有返回箭头的纯开场动画，才点右上“跳过»”。
                     sk=nested_intro_skip_point(shot)
                     if sk:
+                        if time.time()-last_click.get("nested_back",0) < 20:
+                            page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+                            last_click.pop("nested_back",None)
+                            last_click.pop("notice_closed_at",None)
+                            last_click.pop("enter_after_notice",None)
+                            danjie_entry_clicked=False
+                            events.append({"t":round(time.time(),2),"action":"post_dongfu_activity_stack_relaunch",
+                                           "url":page.url})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(12)
+                            break
                         page.mouse.click(sk[0],sk[1])
                         clear_count+=1
                         clean_frames=0
