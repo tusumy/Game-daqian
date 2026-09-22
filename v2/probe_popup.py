@@ -74,23 +74,60 @@ def main_dongfu_point(img):
     return (368.0,920.0)
 
 def dongfu_menu_danjie_point(img):
-    # 新版洞府不是直接出现“丹界药田”按钮，而是先展开一张米白色功能菜单。
-    # 左侧长列与右下“丹界/仙途寻宝”两格同时出现时，才认为是真正的洞府菜单。
+    # 真正的洞府菜单左侧是 11 条彼此分开的米白色横卡片。
+    # 不能再用“大面积浅色”判断，否则修罗战场等浅色页面会被误认成菜单。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    left=hsv[210:875,270:475]
-    right_bottom=hsv[740:875,480:680]
-    if left.size == 0 or right_bottom.size == 0:
+    x0,y0,x1,y1=270,190,475,890
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
         return None
-    def pale_frac(roi):
-        pale=cv2.inRange(roi,np.array([0,0,140]),np.array([180,110,255]))
-        return cv2.countNonZero(pale)/float(pale.size)
-    lf=pale_frac(left)
-    rf=pale_frac(right_bottom)
-    if lf >= 0.65 and rf >= 0.45:
-        # 当前固定 1280x960 画布中，“丹界”卡片中心约为 (575,785)。
-        return (575.0,785.0,lf,rf)
-    return None
 
+    pale=cv2.inRange(roi,np.array([0,0,130]),np.array([180,120,255]))
+    row_frac=pale.mean(axis=1)/255.0
+    active=row_frac > 0.55
+
+    bands=[]
+    start=None
+    for i,v in enumerate(active):
+        if v and start is None:
+            start=i
+        elif not v and start is not None:
+            h=i-start
+            if 35 <= h <= 80:
+                bands.append((start+y0,i-1+y0))
+            start=None
+    if start is not None:
+        h=len(active)-start
+        if 35 <= h <= 80:
+            bands.append((start+y0,len(active)-1+y0))
+
+    # 当前洞府菜单左列稳定有约 11 条卡片；至少 8 条才算命中。
+    if len(bands) < 8:
+        return None
+
+    # 当前 1280x960 画布中，右下“丹界”卡片中心约为 (575,785)。
+    return (575.0,785.0,float(len(bands)))
+
+
+def danjie_page_present(img):
+    # 丹界药田页面中央大面积为青绿山水/药田，修罗战场、活动海报、主界面都不满足。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    roi=hsv[180:760,228:712]
+    if roi.size == 0:
+        return None
+    green=cv2.inRange(roi,np.array([35,35,50]),np.array([100,255,255]))
+    frac=cv2.countNonZero(green)/float(roi.shape[0]*roi.shape[1])
+    if frac < 0.45:
+        return None
+
+    # 再要求顶部丹界区域也有明显青绿色背景，降低主界面误判。
+    top=hsv[95:150,228:500]
+    teal=cv2.inRange(top,np.array([60,20,40]),np.array([110,255,255]))
+    top_frac=cv2.countNonZero(teal)/float(top.shape[0]*top.shape[1])
+    if top_frac < 0.30:
+        return None
+
+    return (frac,top_frac)
 
 def enter_game_point(img):
     # “踏入仙途”只出现在启动画面的下部中间。
@@ -571,7 +608,7 @@ with sync_playwright() as p:
                 action="dongfu_menu_danjie_outer"
                 events.append({"t":round(now,2),"action":"dongfu_menu_danjie_outer",
                                "x":menu[0],"y":menu[1],
-                               "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
+                               "menu_bands":int(menu[2])})
                 print("[VISION]",events[-1],flush=True)
 
                 transition_deadline=time.time()+45
@@ -579,10 +616,10 @@ with sync_playwright() as p:
                 while time.time()<transition_deadline:
                     time.sleep(3)
                     nxt=screenshot_img(page)
-                    if not dongfu_menu_danjie_point(nxt):
+                    if danjie_page_present(nxt):
                         time.sleep(4)
                         page.screenshot(path=str(OUT/"after_danjie_transition.png"),full_page=True)
-                        events.append({"t":round(time.time(),2),"action":"danjie_transition_complete"})
+                        events.append({"t":round(time.time(),2),"action":"danjie_page_positive"})
                         print("[VISION]",events[-1],flush=True)
                         transitioned=True
                         break
@@ -708,20 +745,20 @@ with sync_playwright() as p:
                         danjie_entry_clicked=True
                         events.append({"t":round(time.time(),2),"action":"dongfu_menu_danjie",
                                        "x":menu[0],"y":menu[1],
-                                       "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
+                                       "menu_bands":int(menu[2])})
                         print("[VISION]",events[-1],flush=True)
 
                         # 点中丹界后会出现加载圈，旧版固定 sleep 10 秒会截到半途。
-                        # 最多等 45 秒，直到洞府菜单真正消失，再保存下一页真实画面。
+                        # 最多等 45 秒，直到真正识别到青绿色丹界药田页；菜单消失本身不算成功。
                         transition_deadline=time.time()+45
                         transitioned=False
                         while time.time()<transition_deadline:
                             time.sleep(3)
                             nxt=screenshot_img(page)
-                            if not dongfu_menu_danjie_point(nxt):
+                            if danjie_page_present(nxt):
                                 time.sleep(4)
                                 page.screenshot(path=str(OUT/"after_danjie_transition.png"),full_page=True)
-                                events.append({"t":round(time.time(),2),"action":"danjie_transition_complete"})
+                                events.append({"t":round(time.time(),2),"action":"danjie_page_positive"})
                                 print("[VISION]",events[-1],flush=True)
                                 transitioned=True
                                 break
