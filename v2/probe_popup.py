@@ -480,63 +480,106 @@ def tan_score_at(img,x,y):
 
 
 def probe_one_plant(page, events):
-    # 先只补 1 块空地，验证“空地 -> 选灵植 -> 进入种植状态”。
-    before=screenshot_img(page)
-    empties=empty_plot_candidates(before)
-    if not empties:
-        events.append({"t":round(time.time(),2),"action":"plant_skip","reason":"no_empty_plot"})
-        print("[VISION]",events[-1],flush=True)
-        return
+    # 已验证单块补种成功后，扩成逐块补完所有可识别空地。
+    max_plant=36
+    planted=0
+    bad_spots=[]
 
-    score,x,y=empties[0]
-    before_tan=tan_score_at(before,x,y)
-    page.screenshot(path=str(OUT/"before_one_plant.png"),full_page=True)
-    page.mouse.click(x,y)
-    events.append({"t":round(time.time(),2),"action":"empty_plot_click",
-                   "x":round(x,1),"y":round(y,1),"tan_score":round(before_tan,3)})
+    def near_bad(x,y):
+        return any((x-bx)**2+(y-by)**2 <= 20**2 for bx,by in bad_spots)
+
+    page.screenshot(path=str(OUT/"before_full_plant.png"),full_page=True)
+
+    while planted < max_plant:
+        before=screenshot_img(page)
+        empties=[
+            e for e in empty_plot_candidates(before)
+            if not near_bad(float(e[1]),float(e[2]))
+        ]
+        if not empties:
+            events.append({"t":round(time.time(),2),"action":"full_plant_complete",
+                           "planted":planted,"reason":"no_more_empty_plots"})
+            print("[VISION]",events[-1],flush=True)
+            break
+
+        planted_this_round=False
+
+        # 每轮最多尝试 12 个最明显的棕色空地候选。
+        for idx,(score,x,y) in enumerate(empties[:12],start=1):
+            x=float(x); y=float(y)
+            before_tan=tan_score_at(before,x,y)
+
+            page.mouse.click(x,y)
+            events.append({"t":round(time.time(),2),"action":"empty_plot_click",
+                           "plant_no":planted+1,"candidate":idx,
+                           "x":round(x,1),"y":round(y,1),
+                           "tan_score":round(before_tan,3)})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(1.5)
+
+            panel=screenshot_img(page)
+            if not plant_panel_present(panel):
+                # 不是可种空地，记住这个棕色装饰点，避免重复试。
+                bad_spots.append((x,y))
+                page.mouse.click(470,730)
+                time.sleep(0.6)
+                continue
+
+            # 面板第一页任选已解锁灵植，使用已在 #83 验证成功的位置。
+            page.mouse.click(377,687)
+            events.append({"t":round(time.time(),2),"action":"plant_choice_click",
+                           "plant_no":planted+1,
+                           "x":377.0,"y":687.0})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(1.8)
+
+            mid=screenshot_img(page)
+            if plant_panel_present(mid):
+                # 兼容需要“选中后再点目标地块”的交互。
+                page.mouse.click(x,y)
+                events.append({"t":round(time.time(),2),"action":"plant_target_after_choice",
+                               "plant_no":planted+1,
+                               "x":round(x,1),"y":round(y,1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(2.2)
+            else:
+                time.sleep(1.2)
+
+            after=screenshot_img(page)
+            after_tan=tan_score_at(after,x,y)
+            events.append({"t":round(time.time(),2),"action":"one_plant_verified",
+                           "plant_no":planted+1,
+                           "x":round(x,1),"y":round(y,1),
+                           "before_tan":round(before_tan,3),
+                           "after_tan":round(after_tan,3)})
+            print("[VISION]",events[-1],flush=True)
+
+            if after_tan > before_tan-0.18:
+                page.screenshot(path=str(OUT/"plant_verify_failed.png"),full_page=True)
+                raise RuntimeError(
+                    f"第 {planted+1} 块补种未验证成功：棕色占比 {before_tan:.2f} -> {after_tan:.2f}"
+                )
+
+            planted+=1
+            planted_this_round=True
+            if planted % 5 == 0:
+                page.screenshot(path=str(OUT/f"plant_progress_{planted}.png"),full_page=True)
+            break
+
+        if not planted_this_round:
+            page.screenshot(path=str(OUT/"no_more_valid_empty_plot.png"),full_page=True)
+            events.append({"t":round(time.time(),2),"action":"full_plant_complete",
+                           "planted":planted,
+                           "reason":"remaining_tan_spots_not_plantable",
+                           "ignored_spots":len(bad_spots)})
+            print("[VISION]",events[-1],flush=True)
+            break
+
+    page.screenshot(path=str(OUT/"after_full_plant.png"),full_page=True)
+    events.append({"t":round(time.time(),2),"action":"full_plant_summary",
+                   "planted":planted,"max_plant":max_plant,
+                   "ignored_spots":len(bad_spots)})
     print("[VISION]",events[-1],flush=True)
-    time.sleep(2)
-
-    panel=screenshot_img(page)
-    if not plant_panel_present(panel):
-        page.screenshot(path=str(OUT/"plant_panel_missing.png"),full_page=True)
-        raise RuntimeError("识别到空地并点击，但未出现灵植选择面板")
-
-    page.screenshot(path=str(OUT/"plant_panel_verified.png"),full_page=True)
-
-    # 面板第一页任选已解锁灵植。使用第二张卡“冰凤羽草”附近中心，
-    # 避开标签、分页和“一键种植”开关。
-    page.mouse.click(377,687)
-    events.append({"t":round(time.time(),2),"action":"plant_choice_click",
-                   "x":377.0,"y":687.0})
-    print("[VISION]",events[-1],flush=True)
-    time.sleep(2)
-
-    # 某些交互是“选中后立即种当前地”，某些需要再点一次地块。
-    mid=screenshot_img(page)
-    if plant_panel_present(mid):
-        page.mouse.click(x,y)
-        events.append({"t":round(time.time(),2),"action":"plant_target_after_choice",
-                       "x":round(x,1),"y":round(y,1)})
-        print("[VISION]",events[-1],flush=True)
-        time.sleep(3)
-    else:
-        time.sleep(2)
-
-    after=screenshot_img(page)
-    after_tan=tan_score_at(after,x,y)
-    page.screenshot(path=str(OUT/"after_one_plant.png"),full_page=True)
-    events.append({"t":round(time.time(),2),"action":"one_plant_verified",
-                   "x":round(x,1),"y":round(y,1),
-                   "before_tan":round(before_tan,3),
-                   "after_tan":round(after_tan,3)})
-    print("[VISION]",events[-1],flush=True)
-
-    # 裸地被植株覆盖后，局部浅棕占比应该明显下降。
-    if after_tan > before_tan-0.18:
-        raise RuntimeError(
-            f"补种未验证成功：目标地块棕色占比 {before_tan:.2f} -> {after_tan:.2f}"
-        )
 
 
 def probe_existing_plant(page, events):
