@@ -541,16 +541,13 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
-        # 若误入“天魔古域”等完整活动页，优先点左上返回箭头。
-        if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
-            bp=nested_page_back_point(img)
-            if bp:
-                page.mouse.click(bp[0],bp[1])
-                action="nested_page_back"
-                events.append({"t":round(now,2),"action":"nested_page_back",
-                               "x":round(bp[0],1),"y":round(bp[1],1)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(5)
+        # 明确的“恭喜获得”奖励层优先收掉；这是固定覆盖层，不做泛化返回。
+        if not action and reward_overlay_present(img):
+            page.mouse.click(690,420)
+            action="outer_reward_dismiss"
+            events.append({"t":round(now,2),"action":"outer_reward_dismiss","x":690.0,"y":420.0})
+            print("[VISION]",events[-1],flush=True)
+            time.sleep(4)
 
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
@@ -703,18 +700,6 @@ with sync_playwright() as p:
                         events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_dismiss"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
-                        continue
-
-                    # 完整活动页（如“天魔古域”）不是资料覆盖层；先走左上返回。
-                    bp=nested_page_back_point(shot)
-                    if bp:
-                        page.mouse.click(bp[0],bp[1])
-                        clear_count+=1
-                        clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
-                                       "x":round(bp[0],1),"y":round(bp[1],1)})
-                        print("[VISION]",events[-1],flush=True)
-                        time.sleep(5)
                         continue
 
                     # 资料提示层：点旁边暗处。
