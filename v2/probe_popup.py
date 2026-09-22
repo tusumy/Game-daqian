@@ -312,14 +312,13 @@ def scene_change_score(a,b):
 
 
 def nested_page_back_point(img):
-    # “天魔古域”等完整活动页不是弹窗，左上角有青白色返回箭头。
-    # 这类页面若误入，直接返回主界面再继续洞府流程。
+    # 完整活动页左上真实返回箭头。严格限制形状和中心位置，
+    # 排除曾在主界面反复出现的 x≈268.7 假命中。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     x0,y0,x1,y1=235,95,300,145
     roi=hsv[y0:y1,x0:x1]
     if roi.size == 0:
         return None
-    # 兼容青色/浅白箭头
     cyan=cv2.inRange(roi,np.array([75,20,130]),np.array([110,255,255]))
     pale=cv2.inRange(roi,np.array([0,0,180]),np.array([180,90,255]))
     mask=cv2.bitwise_or(cyan,pale)
@@ -327,10 +326,13 @@ def nested_page_back_point(img):
     best=None
     for i in range(1,n):
         x,y,w,h,area=stats[i]
-        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        if area < 80 or w < 18 or h < 10:
+        if not (250 <= area <= 900 and 28 <= w <= 50 and 16 <= h <= 32):
             continue
-        if not (245 <= cx <= 275 and 105 <= cy <= 135):
+        ratio=w/float(max(1,h))
+        if not (1.2 <= ratio <= 2.8):
+            continue
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (244 <= cx <= 264 and 106 <= cy <= 126):
             continue
         if best is None or area > best[0]:
             best=(area,(cx,cy))
@@ -624,6 +626,34 @@ with sync_playwright() as p:
             print("[VISION]",events[-1],flush=True)
             time.sleep(4)
 
+        # 若误入完整活动页，只在严格命中真实左上返回箭头时退回一次。
+        # 不做“跳过/重载/活动堆栈”推断，避免再次把主线绕坏。
+        if (not action and not main_dongfu_point(img)
+                and not dongfu_menu_danjie_point(img)
+                and not danjie_page_present(img)
+                and now-last_click.get("activity_back",0) >= 8):
+            bp=nested_page_back_point(img)
+            if bp:
+                before_back=img
+                page.mouse.click(bp[0],bp[1])
+                time.sleep(2)
+                after_back=screenshot_img(page)
+                change=scene_change_score(before_back,after_back)
+                if change >= 2.0:
+                    last_click["activity_back"]=now
+                    action="activity_page_back"
+                    events.append({"t":round(now,2),"action":"activity_page_back",
+                                   "x":round(bp[0],1),"y":round(bp[1],1),
+                                   "scene_change":round(change,2)})
+                    print("[VISION]",events[-1],flush=True)
+                    time.sleep(4)
+                else:
+                    last_click["activity_back"]=now
+                    events.append({"t":round(now,2),"action":"activity_page_back_ignored",
+                                   "x":round(bp[0],1),"y":round(bp[1],1),
+                                   "scene_change":round(change,2)})
+                    print("[VISION]",events[-1],flush=True)
+
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
             yp=promo_yellow_x_point(img)
@@ -776,6 +806,28 @@ with sync_playwright() as p:
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
+
+                    # 洞府点击后若活动海报把我们带进完整活动页，只安全返回一次。
+                    bp=nested_page_back_point(shot)
+                    if bp and time.time()-last_click.get("activity_back",0) >= 8:
+                        before_back=shot
+                        page.mouse.click(bp[0],bp[1])
+                        time.sleep(2)
+                        after_back=screenshot_img(page)
+                        change=scene_change_score(before_back,after_back)
+                        last_click["activity_back"]=time.time()
+                        if change >= 2.0:
+                            clean_frames=0
+                            events.append({"t":round(time.time(),2),"action":"post_dongfu_activity_back",
+                                           "x":round(bp[0],1),"y":round(bp[1],1),
+                                           "scene_change":round(change,2)})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(4)
+                            continue
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_activity_back_ignored",
+                                       "x":round(bp[0],1),"y":round(bp[1],1),
+                                       "scene_change":round(change,2)})
+                        print("[VISION]",events[-1],flush=True)
 
                     # 资料提示层：点旁边暗处。
                     if profile_overlay_present(shot):
