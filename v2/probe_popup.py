@@ -130,18 +130,35 @@ def danjie_page_present(img):
     return (frac,top_frac)
 
 def enter_game_point(img):
-    # “踏入仙途”只出现在启动画面的下部中间。
+    # “踏入仙途”启动页采用双锚点：
+    # 1) 下部是大面积青绿色启动按钮/底板；
+    # 2) 左上角存在启动页特有的橙色“16+”适龄提示牌。
+    # 两者同时成立才允许点击，避免把正常主界面的装备/按钮颜色误认成启动页。
     h,w=img.shape[:2]
     if h < 850 or w < 800:
         return None
-    x0,y0,x1,y1=360,740,600,830
-    roi=img[y0:y1,x0:x1]
-    hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
-    green=cv2.inRange(hsv,np.array([35,35,150]),np.array([100,255,255]))
-    white=cv2.inRange(hsv,np.array([0,0,190]),np.array([180,80,255]))
-    score=int(cv2.countNonZero(green))+int(cv2.countNonZero(white))
-    if score < 2200:
+
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+
+    # 下部“踏入仙途”区域：启动页这里几乎整块是青绿色，且纹理相对干净。
+    roi=hsv[740:830,360:600]
+    green=cv2.inRange(roi,np.array([35,35,80]),np.array([100,255,255]))
+    green_frac=cv2.countNonZero(green)/float(roi.shape[0]*roi.shape[1])
+
+    gray=cv2.cvtColor(img[740:830,360:600],cv2.COLOR_BGR2GRAY)
+    edges=cv2.Canny(gray,80,160)
+    edge_frac=cv2.countNonZero(edges)/float(edges.shape[0]*edges.shape[1])
+
+    if green_frac < 0.65 or edge_frac > 0.14:
         return None
+
+    # 左上橙色“16+”牌。
+    badge=hsv[120:185,240:295]
+    orange=cv2.inRange(badge,np.array([5,100,120]),np.array([30,255,255]))
+    orange_frac=cv2.countNonZero(orange)/float(badge.shape[0]*badge.shape[1])
+    if orange_frac < 0.18:
+        return None
+
     return (480.0,790.0)
 
 def network_continue_point(img):
