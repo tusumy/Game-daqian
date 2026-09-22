@@ -283,27 +283,36 @@ def upgrade_cancel_point(img):
 
 
 def today_no_remind_point(img):
-    # 活动海报底部“今日不再提示”左侧的小方框。
-    # 当前游戏画布固定在 1280x960 页面中，该控件稳定落在这块很小的区域。
+    # 活动弹窗右下“今日/当天不再提示”前的小方框。
+    # 不同活动弹窗位置会有几十像素偏移，所以不能只盯一个 40x35 小框。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=515,810,555,845
+    x0,y0,x1,y1=470,760,630,875
     roi=hsv[y0:y1,x0:x1]
     if roi.size == 0:
         return None
-    pale=cv2.inRange(roi,np.array([0,0,120]),np.array([180,110,255]))
+
+    # 复选框通常是浅灰/米白/浅金的小方块，尺寸约 8~22 px。
+    pale=cv2.inRange(roi,np.array([0,0,110]),np.array([180,150,255]))
     n,labels,stats,cent=cv2.connectedComponentsWithStats(pale)
-    best=None
+    candidates=[]
     for i in range(1,n):
         x,y,w,h,area=stats[i]
         cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        if not (8 <= w <= 18 and 8 <= h <= 18 and 25 <= area <= 180):
+        if not (7 <= w <= 24 and 7 <= h <= 24 and 20 <= area <= 320):
             continue
-        if not (525 <= cx <= 545 and 818 <= cy <= 840):
+        if abs(w-h) > 7:
             continue
-        if best is None or area > best[0]:
-            best=(area,(cx,cy))
-    return best[1] if best else None
-
+        # 复选框一般在弹窗底部右侧偏中间的位置。
+        if not (500 <= cx <= 585 and 790 <= cy <= 855):
+            continue
+        fill=area/float(max(1,w*h))
+        if fill < 0.18:
+            continue
+        candidates.append((area,abs(cx-537)+abs(cy-829),(cx,cy)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda z:(z[1],-z[0]))
+    return candidates[0][2]
 
 def scene_change_score(a,b):
     # 判断点关闭键后主游戏区域是否真的发生明显变化。
