@@ -594,6 +594,19 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
+        # 启动页视觉优先：只要真正看到“踏入仙途”按钮，就直接进入。
+        # 不再完全依赖上一动作的 notice_closed_at，避免分支调整后丢状态。
+        if not action:
+            ep=enter_game_point(img)
+            if ep:
+                page.mouse.click(ep[0],ep[1])
+                last_click["enter_after_notice"]=now
+                action="enter_game_visual"
+                events.append({"t":round(now,2),"action":"enter_game_visual",
+                               "x":ep[0],"y":ep[1]})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(15)
+
         # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
         # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
         if (not action and last_click.get("notice_closed_at")
@@ -656,6 +669,9 @@ with sync_playwright() as p:
                     time.sleep(0.8)
                 page.mouse.click(info["x"],info["y"])
                 last_click[pname]=now
+                if pname=="notice_x":
+                    last_click["notice_closed_at"]=now
+                    last_click.pop("enter_after_notice",None)
                 action="outer_"+pname
                 events.append({"t":round(now,2),"action":"outer_"+pname,
                                "score":round(info["score"],4),
@@ -735,7 +751,7 @@ with sync_playwright() as p:
 
         # 内层清弹窗窗口结束后，仍可能晚到一张新的活动海报（如“修罗战场”）。
         # 外层只在“当前不是主界面”时启用通用右上 X，避免把主页亮点误当关闭键。
-        if not action and not main_dongfu_point(img):
+        if not action and not main_dongfu_point(img) and not enter_game_point(img):
             mp=modal_close_point(img)
             if mp:
                 before_close=img
