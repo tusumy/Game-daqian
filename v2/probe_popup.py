@@ -1,4 +1,4 @@
-# explicit V2 probe rerun after maintenance
+# V2 navigation baseline restored from proven-success run #56
 import time, json
 from pathlib import Path
 import cv2, numpy as np
@@ -74,39 +74,22 @@ def main_dongfu_point(img):
     return (368.0,920.0)
 
 def dongfu_menu_danjie_point(img):
-    # 真正的洞府菜单左侧是 11 条彼此分开的米白色横卡片。
-    # 不能再用“大面积浅色”判断，否则修罗战场等浅色页面会被误认成菜单。
+    # 新版洞府不是直接出现“丹界药田”按钮，而是先展开一张米白色功能菜单。
+    # 左侧长列与右下“丹界/仙途寻宝”两格同时出现时，才认为是真正的洞府菜单。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=270,190,475,890
-    roi=hsv[y0:y1,x0:x1]
-    if roi.size == 0:
+    left=hsv[210:875,270:475]
+    right_bottom=hsv[740:875,480:680]
+    if left.size == 0 or right_bottom.size == 0:
         return None
-
-    pale=cv2.inRange(roi,np.array([0,0,130]),np.array([180,120,255]))
-    row_frac=pale.mean(axis=1)/255.0
-    active=row_frac > 0.55
-
-    bands=[]
-    start=None
-    for i,v in enumerate(active):
-        if v and start is None:
-            start=i
-        elif not v and start is not None:
-            h=i-start
-            if 35 <= h <= 80:
-                bands.append((start+y0,i-1+y0))
-            start=None
-    if start is not None:
-        h=len(active)-start
-        if 35 <= h <= 80:
-            bands.append((start+y0,len(active)-1+y0))
-
-    # 当前洞府菜单左列稳定有约 11 条卡片；至少 8 条才算命中。
-    if len(bands) < 8:
-        return None
-
-    # 当前 1280x960 画布中，右下“丹界”卡片中心约为 (575,785)。
-    return (575.0,785.0,float(len(bands)))
+    def pale_frac(roi):
+        pale=cv2.inRange(roi,np.array([0,0,140]),np.array([180,110,255]))
+        return cv2.countNonZero(pale)/float(pale.size)
+    lf=pale_frac(left)
+    rf=pale_frac(right_bottom)
+    if lf >= 0.65 and rf >= 0.45:
+        # 当前固定 1280x960 画布中，“丹界”卡片中心约为 (575,785)。
+        return (575.0,785.0,lf,rf)
+    return None
 
 
 def danjie_page_present(img):
@@ -130,35 +113,18 @@ def danjie_page_present(img):
     return (frac,top_frac)
 
 def enter_game_point(img):
-    # “踏入仙途”启动页采用双锚点：
-    # 1) 下部是大面积青绿色启动按钮/底板；
-    # 2) 左上角存在启动页特有的橙色“16+”适龄提示牌。
-    # 两者同时成立才允许点击，避免把正常主界面的装备/按钮颜色误认成启动页。
+    # “踏入仙途”只出现在启动画面的下部中间。
     h,w=img.shape[:2]
     if h < 850 or w < 800:
         return None
-
-    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-
-    # 下部“踏入仙途”区域：启动页这里几乎整块是青绿色，且纹理相对干净。
-    roi=hsv[740:830,360:600]
-    green=cv2.inRange(roi,np.array([35,35,80]),np.array([100,255,255]))
-    green_frac=cv2.countNonZero(green)/float(roi.shape[0]*roi.shape[1])
-
-    gray=cv2.cvtColor(img[740:830,360:600],cv2.COLOR_BGR2GRAY)
-    edges=cv2.Canny(gray,80,160)
-    edge_frac=cv2.countNonZero(edges)/float(edges.shape[0]*edges.shape[1])
-
-    if green_frac < 0.65 or edge_frac > 0.14:
+    x0,y0,x1,y1=360,740,600,830
+    roi=img[y0:y1,x0:x1]
+    hsv=cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
+    green=cv2.inRange(hsv,np.array([35,35,150]),np.array([100,255,255]))
+    white=cv2.inRange(hsv,np.array([0,0,190]),np.array([180,80,255]))
+    score=int(cv2.countNonZero(green))+int(cv2.countNonZero(white))
+    if score < 2200:
         return None
-
-    # 左上橙色“16+”牌。
-    badge=hsv[120:185,240:295]
-    orange=cv2.inRange(badge,np.array([5,100,120]),np.array([30,255,255]))
-    orange_frac=cv2.countNonZero(orange)/float(badge.shape[0]*badge.shape[1])
-    if orange_frac < 0.18:
-        return None
-
     return (480.0,790.0)
 
 def network_continue_point(img):
@@ -345,35 +311,15 @@ def scene_change_score(a,b):
     return float(np.mean(cv2.absdiff(ga,gb)))
 
 
-def nested_intro_skip_point(img):
-    # “天魔古域”等完整活动开场动画右上角的金色“跳过»”。
-    # 只在游戏画布右上这块小区域寻找成片金黄色文字，命中后点击固定中心。
-    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=615,185,700,245
-    roi=hsv[y0:y1,x0:x1]
-    if roi.size == 0:
-        return None
-    gold=cv2.inRange(roi,np.array([12,70,120]),np.array([45,255,255]))
-    count=cv2.countNonZero(gold)
-    if count < 120:
-        return None
-    ys,xs=np.where(gold>0)
-    if len(xs)==0:
-        return None
-    cx=float(xs.mean()+x0); cy=float(ys.mean()+y0)
-    if not (630 <= cx <= 680 and 195 <= cy <= 235):
-        return None
-    return (652.0,216.0)
-
-
 def nested_page_back_point(img):
-    # 完整活动页左上角的青白色返回箭头。
-    # 真箭头中心稳定在 x≈255,y≈116，组件约 37x23；主页蘑菇高光会偏到 x≈269。
+    # “天魔古域”等完整活动页不是弹窗，左上角有青白色返回箭头。
+    # 这类页面若误入，直接返回主界面再继续洞府流程。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     x0,y0,x1,y1=235,95,300,145
     roi=hsv[y0:y1,x0:x1]
     if roi.size == 0:
         return None
+    # 兼容青色/浅白箭头
     cyan=cv2.inRange(roi,np.array([75,20,130]),np.array([110,255,255]))
     pale=cv2.inRange(roi,np.array([0,0,180]),np.array([180,90,255]))
     mask=cv2.bitwise_or(cyan,pale)
@@ -382,14 +328,14 @@ def nested_page_back_point(img):
     for i in range(1,n):
         x,y,w,h,area=stats[i]
         cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        ratio=w/float(max(1,h))
-        if not (250 <= area <= 900 and 28 <= w <= 50 and 16 <= h <= 32 and 1.2 <= ratio <= 2.8):
+        if area < 80 or w < 18 or h < 10:
             continue
-        if not (244 <= cx <= 264 and 106 <= cy <= 126):
+        if not (245 <= cx <= 275 and 105 <= cy <= 135):
             continue
         if best is None or area > best[0]:
             best=(area,(cx,cy))
     return best[1] if best else None
+
 
 def promo_yellow_x_point(img):
     # “高额返利/充值”类推广弹窗：关闭键是右上偏下的黄色 X，
@@ -436,80 +382,24 @@ def modal_close_point(img):
             best=(area,(cx,cy))
     return best[1] if best else None
 
-def harvest_button_point(img):
-    # 当前“特权”菜单左侧普通收获按钮里有一只粉色手掌。
-    # 菜单会随所点地块上下移动，所以不再写死 y，也不依赖旧版按钮模板。
-    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=360,540,470,735
-    roi=hsv[y0:y1,x0:x1]
-    if roi.size == 0:
-        return None
-    warm=cv2.inRange(roi,np.array([0,30,80]),np.array([25,255,255]))
-    n,labels,stats,cent=cv2.connectedComponentsWithStats(warm)
-    best=None
-    for i in range(1,n):
-        x,y,w,h,area=stats[i]
-        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        if not (350 <= area <= 1400 and 30 <= w <= 60 and 20 <= h <= 45):
-            continue
-        if not (390 <= cx <= 440 and 575 <= cy <= 700):
-            continue
-        if best is None or area > best[0]:
-            best=(area,(cx,cy))
-    return best[1] if best else None
-
-
 def probe_existing_plant(page, events):
-    # 选当前截图右上三格仍明确成熟的灵植做最小拖动验证。
-    # 先动态找左侧普通“收获”手掌按钮；只有命中后才执行拖动。
-    start=(568.0,520.0)
-    drag1=(584.0,531.0)
-    drag2=(600.0,542.0)
-
-    page.screenshot(path=str(OUT/"before_harvest_drag_live.png"),full_page=True)
-
-    # 1) 点成熟作物，打开“特权 / 收获 / 一键收获”菜单。
-    page.mouse.click(start[0],start[1])
-    events.append({"t":round(time.time(),2),"action":"drag_live_mature_click",
-                   "x":start[0],"y":start[1]})
+    # 丹界验证成功后只收一株成熟灵植：先点成熟作物，再点弹出的左侧“收获”。
+    # 绝不点击右侧“一键收获”，避免一次性收掉全部药田。
+    x,y=451.0,526.0
+    page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
+    page.mouse.click(x,y)
+    events.append({"t":round(time.time(),2),"action":"mature_plant_probe_click","x":x,"y":y})
     print("[VISION]",events[-1],flush=True)
-    time.sleep(2)
-
-    # 2) 动态找粉色手掌所在的普通“收获”按钮。
-    menu_img=screenshot_img(page)
-    hp=harvest_button_point(menu_img)
-    if not hp:
-        page.screenshot(path=str(OUT/"harvest_button_visual_not_found.png"),full_page=True)
-        events.append({"t":round(time.time(),2),"action":"harvest_button_visual_not_found"})
-        print("[VISION]",events[-1],flush=True)
-        raise RuntimeError("成熟灵植菜单已打开，但未识别到普通收获的粉色手掌按钮")
-
-    page.mouse.click(hp[0],hp[1])
-    events.append({"t":round(time.time(),2),"action":"harvest_button_visual_click",
-                   "x":round(hp[0],1),"y":round(hp[1],1)})
-    print("[VISION]",events[-1],flush=True)
-    time.sleep(1.2)
-
-    # 3) 进入普通收获状态后，从相邻成熟格按住拖到下一格。
-    page.mouse.move(drag1[0],drag1[1])
-    page.mouse.down()
-    time.sleep(0.7)
-    page.mouse.move(drag2[0],drag2[1],steps=18)
-    time.sleep(1.0)
-    page.mouse.up()
-    events.append({"t":round(time.time(),2),"action":"harvest_drag_live",
-                   "from":[drag1[0],drag1[1]],"to":[drag2[0],drag2[1]]})
-    print("[VISION]",events[-1],flush=True)
-
     time.sleep(3)
-    page.screenshot(path=str(OUT/"after_harvest_drag_live_with_panel.png"),full_page=True)
+    page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
 
-    # 4) 点击远离药田的山景空白处，收掉可能残留面板，再拍全田。
-    page.mouse.click(690.0,430.0)
-    time.sleep(2)
-    page.screenshot(path=str(OUT/"after_harvest_drag_live.png"),full_page=True)
-
-
+    # 当前“特权”菜单：左侧“收获”按钮中心约在 (425,625)。
+    hx,hy=425.0,625.0
+    page.mouse.click(hx,hy)
+    events.append({"t":round(time.time(),2),"action":"single_harvest_click","x":hx,"y":hy})
+    print("[VISION]",events[-1],flush=True)
+    time.sleep(4)
+    page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
 
 
 with sync_playwright() as p:
@@ -533,7 +423,6 @@ with sync_playwright() as p:
     danjie_entry_clicked=False
     abort_reason=None
     deadline=time.time()+540
-    activity_relaunch_count=0
     last_click={}
 
     while time.time()<deadline and not clicked_dongfu and not abort_reason:
@@ -546,14 +435,6 @@ with sync_playwright() as p:
                 matches[name]={"score":float(m[0]),"x":float(m[1][0]),"y":float(m[1][1]),"threshold":thr}
 
         action=None
-
-        # 启动/主界面阶段也可能出现“恭喜获得”奖励层；看到就点空白处收掉。
-        if not action and reward_overlay_present(img):
-            page.mouse.click(690,420)
-            action="outer_reward_dismiss"
-            events.append({"t":round(now,2),"action":"outer_reward_dismiss","x":690.0,"y":420.0})
-            print("[VISION]",events[-1],flush=True)
-            time.sleep(4)
 
         # SDK 登录初始化失败：优先点绿色“重启”，再等待游戏重新拉起。
         if not action and now-last_click.get("sdk_restart",0) >= 12:
@@ -611,19 +492,6 @@ with sync_playwright() as p:
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(6)
 
-        # 启动页视觉优先：只要真正看到“踏入仙途”按钮，就直接进入。
-        # 不再完全依赖上一动作的 notice_closed_at，避免分支调整后丢状态。
-        if not action:
-            ep=enter_game_point(img)
-            if ep:
-                page.mouse.click(ep[0],ep[1])
-                last_click["enter_after_notice"]=now
-                action="enter_game_visual"
-                events.append({"t":round(now,2),"action":"enter_game_visual",
-                               "x":ep[0],"y":ep[1]})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(15)
-
         # 公告刚刚确认关闭后，当前页面就是“踏入仙途”落地页。
         # 只在这个状态下点固定按钮位置，避免公告页/加载页误触。
         if (not action and last_click.get("notice_closed_at")
@@ -647,7 +515,7 @@ with sync_playwright() as p:
                 action="dongfu_menu_danjie_outer"
                 events.append({"t":round(now,2),"action":"dongfu_menu_danjie_outer",
                                "x":menu[0],"y":menu[1],
-                               "menu_bands":int(menu[2])})
+                               "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
                 print("[VISION]",events[-1],flush=True)
 
                 transition_deadline=time.time()+45
@@ -669,91 +537,20 @@ with sync_playwright() as p:
                     page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
                     events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                     print("[VISION]",events[-1],flush=True)
-                    probe_existing_plant(page,events)
+                    page.screenshot(path=str(OUT/"baseline_danjie_verified.png"),full_page=True)
                     clicked_dongfu=True
                 continue
 
-        # 已知活动弹窗必须优先于“活动页/开场动画”处理。
-        # 先勾“今日不再提示”，再关 X，避免把弹窗里的金色元素误认成“跳过”。
-        if not action:
-            for pname in ("event_x","notice_x"):
-                info=matches.get(pname)
-                if not info or info["score"] < info["threshold"]:
-                    continue
-                chk=today_no_remind_point(img) if pname=="event_x" else None
-                if chk:
-                    page.mouse.click(chk[0],chk[1])
-                    time.sleep(0.8)
-                page.mouse.click(info["x"],info["y"])
-                last_click[pname]=now
-                if pname=="notice_x":
-                    last_click["notice_closed_at"]=now
-                    last_click.pop("enter_after_notice",None)
-                action="outer_"+pname
-                events.append({"t":round(now,2),"action":"outer_"+pname,
-                               "score":round(info["score"],4),
-                               "x":round(info["x"],1),"y":round(info["y"],1),
-                               "today_no_remind":bool(chk)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(4)
-                break
-
-        # 完整活动页若有左上返回箭头，永远优先返回；
-        # 只有纯开场动画（没有返回箭头）才允许点右上“跳过»”。
+        # 若误入“天魔古域”等完整活动页，优先点左上返回箭头。
         if not action and not main_dongfu_point(img) and not dongfu_menu_danjie_point(img):
             bp=nested_page_back_point(img)
-            if bp and now-last_click.get("nested_back_false",0) >= 20:
-                before_back=img
+            if bp:
                 page.mouse.click(bp[0],bp[1])
-                time.sleep(2)
-                after_back=screenshot_img(page)
-                change=scene_change_score(before_back,after_back)
-                if change >= 2.0:
-                    last_click["nested_back"]=now
-                    action="nested_page_back"
-                    events.append({"t":round(now,2),"action":"nested_page_back",
-                                   "x":round(bp[0],1),"y":round(bp[1],1),
-                                   "scene_change":round(change,2)})
-                    print("[VISION]",events[-1],flush=True)
-                    time.sleep(3)
-                else:
-                    last_click["nested_back_false"]=now
-                    events.append({"t":round(now,2),"action":"nested_back_false_positive",
-                                   "x":round(bp[0],1),"y":round(bp[1],1),
-                                   "scene_change":round(change,2)})
-                    print("[VISION]",events[-1],flush=True)
-                    page.screenshot(path=str(OUT/"nested_back_false_positive.png"),full_page=True)
-
-        if not action and not nested_page_back_point(img):
-            sk=nested_intro_skip_point(img)
-            if sk:
-                if now-last_click.get("nested_back",0) < 20:
-                    if activity_relaunch_count >= 3:
-                        abort_reason="活动页堆栈连续重载 3 次仍未恢复，停止继续重启"
-                        action="activity_stack_limit"
-                        events.append({"t":round(now,2),"action":"activity_stack_limit",
-                                       "count":activity_relaunch_count})
-                        print("[VISION]",events[-1],flush=True)
-                    else:
-                        activity_relaunch_count+=1
-                        deadline+=180
-                        page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
-                        last_click.pop("nested_back",None)
-                        last_click.pop("notice_closed_at",None)
-                        last_click.pop("enter_after_notice",None)
-                        danjie_entry_clicked=False
-                        action="activity_stack_relaunch"
-                        events.append({"t":round(now,2),"action":"activity_stack_relaunch",
-                                       "count":activity_relaunch_count,"url":page.url})
-                        print("[VISION]",events[-1],flush=True)
-                        time.sleep(15)
-                else:
-                    page.mouse.click(sk[0],sk[1])
-                    action="nested_intro_skip"
-                    events.append({"t":round(now,2),"action":"nested_intro_skip",
-                                   "x":sk[0],"y":sk[1]})
-                    print("[VISION]",events[-1],flush=True)
-                    time.sleep(6)
+                action="nested_page_back"
+                events.append({"t":round(now,2),"action":"nested_page_back",
+                               "x":round(bp[0],1),"y":round(bp[1],1)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(5)
 
         # “2500%高额返利”等充值推广：黄色 X 在普通关闭区域更下方。
         if not action:
@@ -768,7 +565,7 @@ with sync_playwright() as p:
 
         # 内层清弹窗窗口结束后，仍可能晚到一张新的活动海报（如“修罗战场”）。
         # 外层只在“当前不是主界面”时启用通用右上 X，避免把主页亮点误当关闭键。
-        if not action and not main_dongfu_point(img) and not enter_game_point(img):
+        if not action and not main_dongfu_point(img):
             mp=modal_close_point(img)
             if mp:
                 before_close=img
@@ -844,11 +641,11 @@ with sync_playwright() as p:
                         danjie_entry_clicked=True
                         events.append({"t":round(time.time(),2),"action":"dongfu_menu_danjie",
                                        "x":menu[0],"y":menu[1],
-                                       "menu_bands":int(menu[2])})
+                                       "left_pale":round(menu[2],3),"right_pale":round(menu[3],3)})
                         print("[VISION]",events[-1],flush=True)
 
                         # 点中丹界后会出现加载圈，旧版固定 sleep 10 秒会截到半途。
-                        # 最多等 45 秒，直到真正识别到青绿色丹界药田页；菜单消失本身不算成功。
+                        # 最多等 45 秒，直到真正识别到青绿色丹界药田页，再保存下一页真实画面。
                         transition_deadline=time.time()+45
                         transitioned=False
                         while time.time()<transition_deadline:
@@ -868,7 +665,7 @@ with sync_playwright() as p:
                             page.screenshot(path=str(OUT/"actual_danjie.png"),full_page=True)
                             events.append({"t":round(time.time(),2),"action":"danjie_verified"})
                             print("[VISION]",events[-1],flush=True)
-                            probe_existing_plant(page,events)
+                            page.screenshot(path=str(OUT/"baseline_danjie_verified.png"),full_page=True)
                             clicked_dongfu=True
                         break
 
@@ -908,93 +705,16 @@ with sync_playwright() as p:
                         time.sleep(4)
                         continue
 
-                    # 已知活动弹窗优先处理，不能让“返回/跳过”抢先误判。
-                    early_closed=False
-                    for pname in ("event_x","notice_x"):
-                        ppath,thr=TEMPLATES[pname]
-                        mm=best_match(shot,ppath)
-                        if mm and mm[0] >= thr:
-                            chk=today_no_remind_point(shot) if pname=="event_x" else None
-                            if chk:
-                                page.mouse.click(chk[0],chk[1])
-                                time.sleep(0.8)
-                            before_close=screenshot_img(page)
-                            page.mouse.click(mm[1][0],mm[1][1])
-                            clear_count+=1
-                            clean_frames=0
-                            time.sleep(2)
-                            after_close=screenshot_img(page)
-                            change=scene_change_score(before_close,after_close)
-                            events.append({"t":round(time.time(),2),"action":"post_dongfu_priority_"+pname,
-                                           "score":round(float(mm[0]),4),
-                                           "x":round(float(mm[1][0]),1),"y":round(float(mm[1][1]),1),
-                                           "today_no_remind":bool(chk),"scene_change":round(change,2)})
-                            print("[VISION]",events[-1],flush=True)
-                            if change < 2.0:
-                                page.screenshot(path=str(OUT/"stuck_priority_event_close.png"),full_page=True)
-                                abort_reason=f"{pname} 优先关闭后画面未变化"
-                            early_closed=True
-                            break
-                    if abort_reason:
-                        break
-                    if early_closed:
-                        time.sleep(3)
-                        continue
-
-                    # 完整活动页若有左上返回箭头，永远优先返回。
+                    # 完整活动页（如“天魔古域”）不是资料覆盖层；先走左上返回。
                     bp=nested_page_back_point(shot)
-                    if bp and time.time()-last_click.get("nested_back_false",0) >= 20:
-                        before_back=shot
+                    if bp:
                         page.mouse.click(bp[0],bp[1])
-                        time.sleep(2)
-                        after_back=screenshot_img(page)
-                        change=scene_change_score(before_back,after_back)
-                        if change >= 2.0:
-                            last_click["nested_back"]=time.time()
-                            clear_count+=1
-                            clean_frames=0
-                            events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
-                                           "x":round(bp[0],1),"y":round(bp[1],1),
-                                           "scene_change":round(change,2)})
-                            print("[VISION]",events[-1],flush=True)
-                            time.sleep(3)
-                            continue
-                        last_click["nested_back_false"]=time.time()
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back_false_positive",
-                                       "x":round(bp[0],1),"y":round(bp[1],1),
-                                       "scene_change":round(change,2)})
-                        print("[VISION]",events[-1],flush=True)
-                        page.screenshot(path=str(OUT/"post_dongfu_nested_back_false_positive.png"),full_page=True)
-
-                    # 只有没有返回箭头的纯开场动画，才点右上“跳过»”。
-                    sk=nested_intro_skip_point(shot)
-                    if sk:
-                        if time.time()-last_click.get("nested_back",0) < 20:
-                            if activity_relaunch_count >= 3:
-                                abort_reason="活动页堆栈连续重载 3 次仍未恢复，停止继续重启"
-                                events.append({"t":round(time.time(),2),"action":"activity_stack_limit",
-                                               "count":activity_relaunch_count})
-                                print("[VISION]",events[-1],flush=True)
-                                break
-                            activity_relaunch_count+=1
-                            deadline+=180
-                            page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
-                            last_click.pop("nested_back",None)
-                            last_click.pop("notice_closed_at",None)
-                            last_click.pop("enter_after_notice",None)
-                            danjie_entry_clicked=False
-                            events.append({"t":round(time.time(),2),"action":"post_dongfu_activity_stack_relaunch",
-                                           "count":activity_relaunch_count,"url":page.url})
-                            print("[VISION]",events[-1],flush=True)
-                            time.sleep(15)
-                            break
-                        page.mouse.click(sk[0],sk[1])
                         clear_count+=1
                         clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_intro_skip",
-                                       "x":sk[0],"y":sk[1]})
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_nested_back",
+                                       "x":round(bp[0],1),"y":round(bp[1],1)})
                         print("[VISION]",events[-1],flush=True)
-                        time.sleep(6)
+                        time.sleep(5)
                         continue
 
                     # 资料提示层：点旁边暗处。
@@ -1061,9 +781,9 @@ with sync_playwright() as p:
                     if abort_reason:
                         break
                     if closed:
-                        if clear_count >= 30:
+                        if clear_count >= 12:
                             page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
-                            abort_reason="洞府前弹窗链超过 30 次有效处理，停止继续盲点"
+                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
                             break
                         continue
 
@@ -1116,9 +836,9 @@ with sync_playwright() as p:
                                            "kind":"modal_x","scene_change":round(change,2)})
                             print("[VISION]",events[-1],flush=True)
                             break
-                        if clear_count >= 30:
+                        if clear_count >= 12:
                             page.screenshot(path=str(OUT/"popup_chain_limit.png"),full_page=True)
-                            abort_reason="洞府前弹窗链超过 30 次有效处理，停止继续盲点"
+                            abort_reason="洞府前弹窗链超过 12 层，停止继续盲点"
                             break
                         continue
 
@@ -1141,6 +861,11 @@ with sync_playwright() as p:
                   continue
               if now-last_click.get(name,0) < 8:
                   continue
+              if name=="event_x":
+                  chk=today_no_remind_point(img)
+                  if chk:
+                      page.mouse.click(chk[0],chk[1])
+                      time.sleep(0.8)
               page.mouse.click(info["x"],info["y"])
               last_click[name]=now
               action=name
