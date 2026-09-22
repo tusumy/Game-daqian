@@ -825,6 +825,19 @@ with sync_playwright() as p:
                     clicked_dongfu=True
                 continue
 
+        # 仙官发玉优先于所有通用弹窗逻辑。
+        # 不勾“本次登录不再提示”，保留本次奖励；只点空白推进/收掉当前仙官层。
+        if not action:
+            oi=matches.get("officer_no_remind")
+            if oi and oi["score"] >= oi["threshold"]:
+                page.mouse.click(690,420)
+                last_click["officer_popup"]=now
+                action="officer_popup"
+                events.append({"t":round(now,2),"action":"officer_reward_advance",
+                               "score":round(oi["score"],4)})
+                print("[VISION]",events[-1],flush=True)
+                time.sleep(4)
+
         # 明确的“恭喜获得”奖励层优先收掉；这是固定覆盖层，不做泛化返回。
         if not action and reward_overlay_present(img):
             page.mouse.click(690,420)
@@ -902,21 +915,6 @@ with sync_playwright() as p:
                 action="daily_popup"
                 events.append({"t":round(now,2),"action":"daily_popup_no_remind",
                                "score":round(di["score"],4)})
-                print("[VISION]",events[-1],flush=True)
-                time.sleep(4)
-
-        # 仙官发玉不是必经流程，只在真的出现时处理。
-        # 不再勾“本次登录不再提示”：该勾选会弹出“无法获得对应奖励”的二次确认。
-        # 让奖励动画完成后直接收掉仙官层，保留本次玉奖励。
-        if not action:
-            oi=matches.get("officer_no_remind")
-            if oi and oi["score"] >= oi["threshold"]:
-                time.sleep(4)
-                page.mouse.click(690,420)
-                last_click["officer_popup"]=now
-                action="officer_popup"
-                events.append({"t":round(now,2),"action":"officer_reward_dismiss",
-                               "score":round(oi["score"],4)})
                 print("[VISION]",events[-1],flush=True)
                 time.sleep(4)
 
@@ -1004,11 +1002,10 @@ with sync_playwright() as p:
                     # 不勾“不再提示”，避免触发“无法获得对应奖励”的确认框。
                     om=best_match(shot,"v2/templates/officer_no_remind.png")
                     if om and om[0] >= 0.80:
-                        time.sleep(4)
                         page.mouse.click(690,420)
-                        clear_count+=1
                         clean_frames=0
-                        events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_dismiss"})
+                        last_click["officer_flow_seen"]=time.time()
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_officer_reward_advance"})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
@@ -1038,8 +1035,8 @@ with sync_playwright() as p:
                     # 资料提示层：点旁边暗处。
                     if profile_overlay_present(shot):
                         page.mouse.click(250,700)
-                        clear_count+=1
-                        events.append({"t":round(time.time(),2),"action":"dismiss_profile_overlay","x":250.0,"y":700.0})
+                        last_click["officer_flow_seen"]=time.time()
+                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
@@ -1048,8 +1045,7 @@ with sync_playwright() as p:
                     if reward_overlay_present(shot):
                         page.screenshot(path=str(OUT/"after_dongfu_before_reward_close.png"),full_page=True)
                         page.mouse.click(690,420)
-                        clear_count+=1
-                        events.append({"t":round(time.time(),2),"action":"dismiss_reward_overlay","x":690.0,"y":420.0})
+                        events.append({"t":round(time.time(),2),"action":"known_reward_overlay_advance","x":690.0,"y":420.0})
                         print("[VISION]",events[-1],flush=True)
                         time.sleep(4)
                         continue
