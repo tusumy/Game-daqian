@@ -517,6 +517,7 @@ with sync_playwright() as p:
     danjie_entry_clicked=False
     abort_reason=None
     deadline=time.time()+540
+    activity_relaunch_count=0
     last_click={}
 
     while time.time()<deadline and not clicked_dongfu and not abort_reason:
@@ -660,15 +661,25 @@ with sync_playwright() as p:
             sk=nested_intro_skip_point(img)
             if sk:
                 if now-last_click.get("nested_back",0) < 20:
-                    page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
-                    last_click.pop("nested_back",None)
-                    last_click.pop("notice_closed_at",None)
-                    last_click.pop("enter_after_notice",None)
-                    danjie_entry_clicked=False
-                    action="activity_stack_relaunch"
-                    events.append({"t":round(now,2),"action":"activity_stack_relaunch","url":page.url})
-                    print("[VISION]",events[-1],flush=True)
-                    time.sleep(12)
+                    if activity_relaunch_count >= 3:
+                        abort_reason="活动页堆栈连续重载 3 次仍未恢复，停止继续重启"
+                        action="activity_stack_limit"
+                        events.append({"t":round(now,2),"action":"activity_stack_limit",
+                                       "count":activity_relaunch_count})
+                        print("[VISION]",events[-1],flush=True)
+                    else:
+                        activity_relaunch_count+=1
+                        deadline+=180
+                        page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
+                        last_click.pop("nested_back",None)
+                        last_click.pop("notice_closed_at",None)
+                        last_click.pop("enter_after_notice",None)
+                        danjie_entry_clicked=False
+                        action="activity_stack_relaunch"
+                        events.append({"t":round(now,2),"action":"activity_stack_relaunch",
+                                       "count":activity_relaunch_count,"url":page.url})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(15)
                 else:
                     page.mouse.click(sk[0],sk[1])
                     action="nested_intro_skip"
@@ -847,15 +858,23 @@ with sync_playwright() as p:
                     sk=nested_intro_skip_point(shot)
                     if sk:
                         if time.time()-last_click.get("nested_back",0) < 20:
+                            if activity_relaunch_count >= 3:
+                                abort_reason="活动页堆栈连续重载 3 次仍未恢复，停止继续重启"
+                                events.append({"t":round(time.time(),2),"action":"activity_stack_limit",
+                                               "count":activity_relaunch_count})
+                                print("[VISION]",events[-1],flush=True)
+                                break
+                            activity_relaunch_count+=1
+                            deadline+=180
                             page.goto(GAME_URL,wait_until="domcontentloaded",timeout=60000)
                             last_click.pop("nested_back",None)
                             last_click.pop("notice_closed_at",None)
                             last_click.pop("enter_after_notice",None)
                             danjie_entry_clicked=False
                             events.append({"t":round(time.time(),2),"action":"post_dongfu_activity_stack_relaunch",
-                                           "url":page.url})
+                                           "count":activity_relaunch_count,"url":page.url})
                             print("[VISION]",events[-1],flush=True)
-                            time.sleep(12)
+                            time.sleep(15)
                             break
                         page.mouse.click(sk[0],sk[1])
                         clear_count+=1
