@@ -473,7 +473,9 @@ def probe_existing_plant(page, events):
             hp=harvest_popup_point(menu_img)
             if not hp:
                 bad_spots.append((x,y))
-                page.mouse.click(690,450)
+                # 中央下方是一块稳定空白草地；不要再点右侧 (690,450)，
+                # 那里靠近“药仙来访”，会误开“药仙订单”。
+                page.mouse.click(470,730)
                 time.sleep(0.8)
                 continue
 
