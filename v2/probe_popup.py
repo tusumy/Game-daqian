@@ -382,24 +382,99 @@ def modal_close_point(img):
             best=(area,(cx,cy))
     return best[1] if best else None
 
-def probe_existing_plant(page, events):
-    # 丹界验证成功后只收一株成熟灵植：先点成熟作物，再点弹出的左侧“收获”。
-    # 绝不点击右侧“一键收获”，避免一次性收掉全部药田。
-    x,y=451.0,526.0
-    page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
-    page.mouse.click(x,y)
-    events.append({"t":round(time.time(),2),"action":"mature_plant_probe_click","x":x,"y":y})
-    print("[VISION]",events[-1],flush=True)
-    time.sleep(3)
-    page.screenshot(path=str(OUT/"after_plant_probe.png"),full_page=True)
+def mature_candidate_points(img):
+    # 成熟灵植顶部稳定有一枚约 12x8 px 的白金色亮点。
+    # #56 真收获成功时点击坐标 (451,525) 正好命中这类亮点；
+    # 收掉后该亮点会消失，因此可同时用于选株和结果验证。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=280,470,690,655
+    roi=hsv[y0:y1,x0:x1]
+    bright=cv2.inRange(roi,np.array([0,0,180]),np.array([60,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(bright)
+    pts=[]
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (35 <= area <= 75 and 10 <= w <= 14 and 6 <= h <= 10):
+            continue
+        pts.append((cx,cy,area))
+    # 优先从靠中间的成熟株开始，避免边缘装饰元素。
+    pts.sort(key=lambda p:(abs(p[0]-480)+abs(p[1]-555),p[1],p[0]))
+    return pts
 
-    # 当前“特权”菜单：左侧“收获”按钮中心约在 (425,625)。
-    hx,hy=425.0,625.0
-    page.mouse.click(hx,hy)
-    events.append({"t":round(time.time(),2),"action":"single_harvest_click","x":hx,"y":hy})
-    print("[VISION]",events[-1],flush=True)
-    time.sleep(4)
-    page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
+
+def harvest_popup_point(img):
+    # 成熟株点击后出现的小“特权”菜单约 300x130，
+    # 而空地的选种面板高达 300+ px。只认这种小暗色菜单，避免误把选种当收获。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=300,520,680,710
+    roi=hsv[y0:y1,x0:x1]
+    dark=cv2.inRange(roi,np.array([0,0,0]),np.array([180,255,130]))
+    dark=cv2.morphologyEx(dark,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(dark)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        gx=x+x0; gy=y+y0
+        if not (200 <= w <= 350 and 90 <= h <= 165 and 12000 <= area <= 40000):
+            continue
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (400 <= cx <= 540 and 570 <= cy <= 660):
+            continue
+        if best is None or area > best[0]:
+            best=(area,gx,gy,w,h)
+    if not best:
+        return None
+    _,x,y,w,h=best
+    # 左半边普通“收获”；右半边是 VIP “一键收获”，绝不点右侧。
+    return (x+0.28*w, y+0.57*h)
+
+
+def probe_existing_plant(page, events):
+    # 只收一株，并且要求“成熟亮点 -> 特权菜单 -> 亮点消失”三段都验证通过。
+    page.screenshot(path=str(OUT/"before_plant_probe.png"),full_page=True)
+    before=screenshot_img(page)
+    candidates=mature_candidate_points(before)
+    if not candidates:
+        page.screenshot(path=str(OUT/"no_mature_candidate.png"),full_page=True)
+        raise RuntimeError("丹界已进入，但没有识别到成熟灵植亮点")
+
+    # 先试最可信的前 6 个成熟候选；未出现特权菜单就换下一株。
+    for idx,(x,y,area) in enumerate(candidates[:6],start=1):
+        page.mouse.click(x,y)
+        events.append({"t":round(time.time(),2),"action":"mature_candidate_click",
+                       "candidate":idx,"x":round(x,1),"y":round(y,1),"area":int(area)})
+        print("[VISION]",events[-1],flush=True)
+        time.sleep(2)
+
+        menu_img=screenshot_img(page)
+        hp=harvest_popup_point(menu_img)
+        if not hp:
+            # 不是成熟株菜单时点农田上方空白收掉当前层，再试下一候选。
+            page.mouse.click(690,450)
+            time.sleep(2)
+            continue
+
+        page.screenshot(path=str(OUT/"harvest_menu_verified.png"),full_page=True)
+        page.mouse.click(hp[0],hp[1])
+        events.append({"t":round(time.time(),2),"action":"single_harvest_click",
+                       "x":round(hp[0],1),"y":round(hp[1],1),"candidate":idx})
+        print("[VISION]",events[-1],flush=True)
+        time.sleep(4)
+
+        after=screenshot_img(page)
+        page.screenshot(path=str(OUT/"after_single_harvest.png"),full_page=True)
+        remaining=mature_candidate_points(after)
+        still_here=any((px-x)**2+(py-y)**2 <= 12**2 for px,py,_ in remaining)
+        events.append({"t":round(time.time(),2),"action":"single_harvest_verified",
+                       "candidate":idx,"bright_point_removed":not still_here})
+        print("[VISION]",events[-1],flush=True)
+        if still_here:
+            raise RuntimeError("已点击普通收获，但成熟灵植亮点仍在，不能判定收获成功")
+        return
+
+    page.screenshot(path=str(OUT/"no_harvest_menu_from_candidates.png"),full_page=True)
+    raise RuntimeError("识别到成熟候选，但前 6 个都没有出现特权收获菜单")
 
 
 with sync_playwright() as p:
