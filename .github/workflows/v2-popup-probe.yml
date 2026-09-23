@@ -9,6 +9,7 @@ on:
       - 'v2/probe_popup.py'
       - 'v2/patch_grid_harvest.py'
       - 'v2/patch_panel_fix.py'
+      - 'v2/patch_plant_verify.py'
       - 'v2/templates/**'
       - '.github/workflows/v2-popup-probe.yml'
   workflow_dispatch:
@@ -60,6 +61,7 @@ jobs:
         run: |
           python v2/patch_grid_harvest.py
           python v2/patch_panel_fix.py
+          python v2/patch_plant_verify.py
       - run: python v2/probe_popup.py
       - name: Preserve auth state
         if: always()
