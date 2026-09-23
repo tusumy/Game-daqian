@@ -57,9 +57,12 @@ s = s[:start_cls] + classifiers + s[end_cls:]
 # 因此彻底废弃 empty_plot_candidates() 的视觉猜空逻辑：
 # 逐格点击 6x6 的 36 个真实地块，只有游戏自己弹出“灵植/造化灵植”选种面板才补种。
 start_fn = s.find("def probe_one_plant(page, events):")
-end_fn = s.find("\ndef probe_existing_plant(page, events):", start_fn)
+# patch_grid_harvest.py 会把 farm_plot_centers / local_plot_change_score 插在
+# probe_one_plant 与 probe_existing_plant 之间。这里只替换旧补种函数本身，
+# 绝不能再一路切到 probe_existing_plant，否则会把 36 格坐标函数一起删掉。
+end_fn = s.find("\ndef farm_plot_centers():", start_fn)
 if start_fn < 0 or end_fn < 0:
-    raise SystemExit("probe_one_plant block not found")
+    raise SystemExit("probe_one_plant/farm_plot_centers boundary not found")
 
 probe = r'''def probe_one_plant(page, events):
     planted=0
@@ -149,4 +152,4 @@ probe = r'''def probe_one_plant(page, events):
 
 s = s[:start_fn] + probe + s[end_fn:]
 p.write_text(s, encoding="utf-8")
-print("patched 6x6 UI-oracle planting; tan empty detector retired")
+print("patched 6x6 UI-oracle planting; preserved farm_plot_centers/local_plot_change_score")
