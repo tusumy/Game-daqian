@@ -58,13 +58,39 @@ s = s[:start_cls] + classifiers + s[end_cls:]
 # 逐格点击 6x6 的 36 个真实地块，只有游戏自己弹出“灵植/造化灵植”选种面板才补种。
 start_fn = s.find("def probe_one_plant(page, events):")
 # patch_grid_harvest.py 会把 farm_plot_centers / local_plot_change_score 插在
-# probe_one_plant 与 probe_existing_plant 之间。这里只替换旧补种函数本身，
-# 绝不能再一路切到 probe_existing_plant，否则会把 36 格坐标函数一起删掉。
+# probe_one_plant 与 probe_existing_plant 之间。这里只替换旧补种函数本身。
 end_fn = s.find("\ndef farm_plot_centers():", start_fn)
 if start_fn < 0 or end_fn < 0:
     raise SystemExit("probe_one_plant/farm_plot_centers boundary not found")
 
-probe = r'''def probe_one_plant(page, events):
+# 最终补丁自己带一份 36 格坐标/局部变化 helper。
+# #101 证明多个 runtime patch 连续替换时，不能依赖前一个补丁留下 helper；
+# 即使后面仍保留一份同名定义也无妨，两份实现完全一致。
+probe = r'''def farm_plot_centers():
+    base_x,base_y=476.0,486.0
+    dx,dy=33.0,15.0
+    pts=[]
+    for i in range(6):
+        for j in range(6):
+            pts.append((base_x+dx*(i-j),base_y+dy*(i+j)))
+    pts.sort(key=lambda p:(p[1],p[0]))
+    return pts
+
+
+def local_plot_change_score(a,b,x,y):
+    x=int(round(x)); y=int(round(y))
+    x0=max(0,x-30); x1=min(a.shape[1],x+31)
+    y0=max(0,y-38); y1=min(a.shape[0],y+28)
+    ra=a[y0:y1,x0:x1]
+    rb=b[y0:y1,x0:x1]
+    if ra.size == 0 or rb.size == 0 or ra.shape != rb.shape:
+        return 999.0
+    ga=cv2.cvtColor(ra,cv2.COLOR_BGR2GRAY)
+    gb=cv2.cvtColor(rb,cv2.COLOR_BGR2GRAY)
+    return float(np.mean(cv2.absdiff(ga,gb)))
+
+
+def probe_one_plant(page, events):
     planted=0
     empty_seen=0
     occupied_seen=0
@@ -152,4 +178,4 @@ probe = r'''def probe_one_plant(page, events):
 
 s = s[:start_fn] + probe + s[end_fn:]
 p.write_text(s, encoding="utf-8")
-print("patched 6x6 UI-oracle planting; preserved farm_plot_centers/local_plot_change_score")
+print("patched 6x6 UI-oracle planting; self-contained grid helpers")
