@@ -6,6 +6,7 @@ on:
     paths:
       - 'v2/probe_popup.py'
       - 'v2/patch_grid_harvest.py'
+      - 'v2/patch_panel_fix.py'
       - 'v2/templates/**'
       - '.github/workflows/v2-popup-probe.yml'
   workflow_dispatch:
@@ -54,7 +55,9 @@ jobs:
           fi
           test -f /tmp/xddq29/storage_state.json
       - name: Apply V2 runtime patches
-        run: python v2/patch_grid_harvest.py
+        run: |
+          python v2/patch_grid_harvest.py
+          python v2/patch_panel_fix.py
       - run: python v2/probe_popup.py
       - name: Preserve auth state
         if: always()
