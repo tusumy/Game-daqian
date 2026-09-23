@@ -1,8 +1,6 @@
-name: 自动打理大千药田
+name: 旧版药田（手动备用）
 
 on:
-  schedule:
-    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 permissions:
