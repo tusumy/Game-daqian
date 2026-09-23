@@ -3,19 +3,20 @@ from pathlib import Path
 p = Path("v2/probe_popup.py")
 s = p.read_text(encoding="utf-8")
 
-# #95 现场证明：靠下地块的“浇水/锄除”管理面板会延伸到 y>740，
-# 旧版按固定高度判断会把它误认成选种面板。
-# 改用 UI 结构本身：选种面板有宽大的青绿色“造化灵植”标签；
-# 管理面板没有该标签，但有一整块宽大的深色操作区。
-start_cls = s.find("def plant_panel_present(img):")
-end_cls = s.find("def vip_monthly_warning_present(img):", start_cls)
-if start_cls < 0 or end_cls < 0:
-    raise SystemExit("panel classifier block not found")
+# patch_panel_fix.py 会在 farm_plot_centers 前注入最终覆盖版的
+# plant_panel_present / management_panel_present / vip_monthly_warning_present。
+# 文件里还保留更早的旧 plant_panel_present，同名函数不能用 find() 抓第一处，
+# 否则会把两处之间的大段主逻辑一起删掉。这里先定位最终 VIP 定义，
+# 再向前 rfind 最近的 plant_panel_present，只替换最终覆盖块。
+end_cls = s.find("def vip_monthly_warning_present(img):")
+if end_cls < 0:
+    raise SystemExit("final vip_monthly_warning_present not found; run patch_panel_fix.py first")
+start_cls = s.rfind("def plant_panel_present(img):", 0, end_cls)
+if start_cls < 0:
+    raise SystemExit("final plant_panel_present not found before vip classifier")
 
 classifiers = r'''def plant_panel_present(img):
-    # 真正的选种面板固定带有宽大的青绿色“造化灵植”标签，
-    # 位置约 x=380..505,y=540..580。背景场景虽也有青绿色，
-    # 但不会形成面积>3000、宽>120、高>42 的整块标签。
+    # 真正的选种面板固定带有宽大的青绿色“造化灵植”标签。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     x0,y0,x1,y1=360,530,520,595
     roi=hsv[y0:y1,x0:x1]
@@ -32,13 +33,12 @@ classifiers = r'''def plant_panel_present(img):
 
 
 def management_panel_present(img):
-    # “浇水/锄除”管理面板会根据地块上下移动，不能再按固定 y 尾部判断。
-    # 它的主体始终是一整块约 460px 宽、120px 以上高的深色操作区。
-    # 先排除真正的选种面板，再检测这块大深色连通区域。
+    # “浇水/锄除”管理面板会随地块上下移动；先排除选种面板，
+    # 再认其宽大的深色操作区。
     if plant_panel_present(img):
         return False
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=240,600,700,850
+    x0,y0,x1,y1=240,560,700,860
     roi=hsv[y0:y1,x0:x1]
     if roi.size == 0:
         return False
@@ -73,9 +73,8 @@ replacement = r'''            after=screenshot_img(page)
                            "after_tan":round(after_tan,3)})
             print("[VISION]",events[-1],flush=True)
 
-            # 不再用“棕色下降多少”作为最终裁判。重新点击同一地块，
-            # 让游戏自己的 UI 判断：有植物 -> 浇水/锄除管理面板；
-            # 真空地 -> 重新打开选种面板。
+            # 重新点击同一地块，让游戏 UI 自己判断是否已占用：
+            # 有植物 -> 浇水/锄除管理面板；真空地 -> 重新打开选种面板。
             page.mouse.click(x,y)
             time.sleep(1.2)
             verify=screenshot_img(page)
@@ -101,7 +100,6 @@ replacement = r'''            after=screenshot_img(page)
                     f"tan {before_tan:.2f}->{after_tan:.2f}"
                 )
 
-            # 已确认有植物，关闭管理面板后继续下一块。
             page.mouse.click(470,430)
             time.sleep(0.6)
 
@@ -109,4 +107,4 @@ replacement = r'''            after=screenshot_img(page)
 
 s = s[:start] + replacement + s[end:]
 p.write_text(s, encoding="utf-8")
-print("patched structural panel classifiers + game-UI plant reprobe oracle")
+print("patched final structural panel classifiers + game-UI plant reprobe oracle")
