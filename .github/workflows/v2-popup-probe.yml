@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'v2/probe_popup.py'
+      - 'v2/patch_grid_harvest.py'
       - 'v2/templates/**'
       - '.github/workflows/v2-popup-probe.yml'
   workflow_dispatch:
@@ -52,18 +53,8 @@ jobs:
             cp "$STATE_FILE" /tmp/xddq29/storage_state.json
           fi
           test -f /tmp/xddq29/storage_state.json
-      - name: Avoid Danjie tutorial hand overlay
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('v2/probe_popup.py')
-          s=p.read_text(encoding='utf-8')
-          old='return (575.0,785.0,lf,rf)'
-          new='return (625.0,785.0,lf,rf)'
-          if old not in s:
-              raise SystemExit('Danjie entry anchor not found')
-          p.write_text(s.replace(old,new,1),encoding='utf-8')
-          PY
+      - name: Apply V2 runtime patches
+        run: python v2/patch_grid_harvest.py
       - run: python v2/probe_popup.py
       - name: Preserve auth state
         if: always()
