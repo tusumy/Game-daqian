@@ -1,6 +1,8 @@
-name: V2 Popup Probe
+name: 自动打理大千药田 V2
 
 on:
+  schedule:
+    - cron: '0 */4 * * *'
   push:
     branches: [main]
     paths:
@@ -21,7 +23,7 @@ concurrency:
 
 jobs:
   probe:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-v2]')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[run-v2]')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
