@@ -8,6 +8,7 @@ on:
     paths:
       - 'v2/probe_popup.py'
       - 'v2/patch_grid_harvest.py'
+      - 'v2/patch_entry_menu_guard.py'
       - 'v2/patch_panel_fix.py'
       - 'v2/patch_plant_verify.py'
       - 'v2/templates/**'
@@ -60,6 +61,7 @@ jobs:
       - name: Apply V2 runtime patches
         run: |
           python v2/patch_grid_harvest.py
+          python v2/patch_entry_menu_guard.py
           python v2/patch_panel_fix.py
           python v2/patch_plant_verify.py
       - run: python v2/probe_popup.py
