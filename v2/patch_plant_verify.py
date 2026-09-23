@@ -5,9 +5,7 @@ s = p.read_text(encoding="utf-8")
 
 # patch_panel_fix.py 会在 farm_plot_centers 前注入最终覆盖版的
 # plant_panel_present / management_panel_present / vip_monthly_warning_present。
-# 文件里还保留更早的旧 plant_panel_present，同名函数不能用 find() 抓第一处，
-# 否则会把两处之间的大段主逻辑一起删掉。这里先定位最终 VIP 定义，
-# 再向前 rfind 最近的 plant_panel_present，只替换最终覆盖块。
+# 文件里还保留更早的旧 plant_panel_present，同名函数不能用 find() 抓第一处。
 end_cls = s.find("def vip_monthly_warning_present(img):")
 if end_cls < 0:
     raise SystemExit("final vip_monthly_warning_present not found; run patch_panel_fix.py first")
@@ -16,25 +14,26 @@ if start_cls < 0:
     raise SystemExit("final plant_panel_present not found before vip classifier")
 
 classifiers = r'''def plant_panel_present(img):
-    # 真正的选种面板固定带有宽大的青绿色“造化灵植”标签。
+    # 真正的选种面板顶部固定有一对并排标签：
+    # 左侧黄色“灵植”，右侧青绿色“造化灵植”。
+    # #97 证明仅看右侧青绿色会把管理面板上方的绿色植物状态条误认成选种面板，
+    # 因此现在必须同时命中左黄 + 右青两块大标签。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    x0,y0,x1,y1=360,530,520,595
-    roi=hsv[y0:y1,x0:x1]
-    if roi.size == 0:
+    left=hsv[535:585,245:385]
+    right=hsv[535:585,370:515]
+    if left.size == 0 or right.size == 0:
         return False
-    teal=cv2.inRange(roi,np.array([70,60,70]),np.array([115,220,220]))
-    n,labels,stats,cent=cv2.connectedComponentsWithStats(teal)
-    for i in range(1,n):
-        x,y,w,h,area=stats[i]
-        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
-        if area >= 3000 and w >= 120 and h >= 42 and 420 <= cx <= 475 and 545 <= cy <= 582:
-            return True
-    return False
+
+    yellow=cv2.inRange(left,np.array([15,80,170]),np.array([35,255,255]))
+    teal=cv2.inRange(right,np.array([75,50,90]),np.array([110,220,230]))
+    yellow_frac=cv2.countNonZero(yellow)/float(yellow.shape[0]*yellow.shape[1])
+    teal_frac=cv2.countNonZero(teal)/float(teal.shape[0]*teal.shape[1])
+    return yellow_frac >= 0.35 and teal_frac >= 0.35
 
 
 def management_panel_present(img):
-    # “浇水/锄除”管理面板会随地块上下移动；先排除选种面板，
-    # 再认其宽大的深色操作区。
+    # “浇水/锄除”管理面板会随地块上下移动。
+    # 先排除真正的双标签选种面板，再认其宽大的深色操作区。
     if plant_panel_present(img):
         return False
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
@@ -107,4 +106,4 @@ replacement = r'''            after=screenshot_img(page)
 
 s = s[:start] + replacement + s[end:]
 p.write_text(s, encoding="utf-8")
-print("patched final structural panel classifiers + game-UI plant reprobe oracle")
+print("patched dual-tab plant classifier + management panel classifier + reprobe oracle")
