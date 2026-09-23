@@ -125,5 +125,9 @@ if needle in s:
 # 改到药田上方中间的稳定空白草地，只用于关闭选种/管理面板。
 s=s.replace("page.mouse.click(470,730)","page.mouse.click(470,430)")
 
+# #93 现场确认小苗已经种出，但棕色地块下降只有 0.165；原 0.18 阈值过严。
+# 仍要求选种面板出现并且棕色占比至少下降 0.12，避免把未种上的空地算成功。
+s=s.replace("before_tan-0.18","before_tan-0.12")
+
 p.write_text(s,encoding="utf-8")
-print("patched skin-hand ordinary harvest + strict VIP warning guard + safe dismiss point")
+print("patched skin-hand ordinary harvest + strict VIP warning guard + safe dismiss point + tolerant plant verify")
