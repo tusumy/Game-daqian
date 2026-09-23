@@ -6,6 +6,69 @@ s = p.read_text(encoding="utf-8")
 # 丹界入口右移，避开偶发覆盖在卡片中央的黄色引导手。
 s = s.replace("return (575.0,785.0,lf,rf)", "return (625.0,785.0,lf,rf)")
 
+# 新活动“仙阁雅宴”这类覆盖层没有关闭 X，只有中央橙色“前往”。
+# 单独识别这个固定按钮；进入活动页后马上用已有的严格左上返回箭头退回。
+helper_anchor = "def today_no_remind_point(img):"
+helper = r'''def forward_only_event_button(img):
+    # 仅识别游戏画面下部中央那枚“前往”橙色按钮。
+    # 当前仙阁雅宴按钮中心约 (470,787)，与“感悟升级”的左取消按钮位置明显不同。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=385,755,555,820
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    orange=cv2.inRange(roi,np.array([0,80,100]),np.array([30,255,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(orange)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area < 1200 or not (85 <= w <= 155 and 24 <= h <= 55):
+            continue
+        if not (435 <= cx <= 510 and 772 <= cy <= 808):
+            continue
+        if best is None or area > best[0]:
+            best=(area,(cx,cy))
+    return best[1] if best else None
+
+
+'''
+if "def forward_only_event_button(img):" not in s:
+    if helper_anchor not in s:
+        raise SystemExit("today_no_remind_point anchor not found")
+    s=s.replace(helper_anchor,helper+helper_anchor,1)
+
+handler_anchor = '                    # 每日活动弹窗：勾“今日不再提示”后关闭。\n'
+handler = r'''                    # “仙阁雅宴”等无关闭 X、只有“前往”的覆盖层。
+                    # 不能再让通用 X 把飘动桃花当关闭键；点“前往”后只做一次严格返回。
+                    fp=forward_only_event_button(shot)
+                    if fp:
+                        page.screenshot(path=str(OUT/"forward_only_event_before.png"),full_page=True)
+                        page.mouse.click(fp[0],fp[1])
+                        events.append({"t":round(time.time(),2),"action":"forward_only_event_enter",
+                                       "x":round(fp[0],1),"y":round(fp[1],1)})
+                        print("[VISION]",events[-1],flush=True)
+                        time.sleep(6)
+                        entered=screenshot_img(page)
+                        bp=nested_page_back_point(entered)
+                        if bp:
+                            page.mouse.click(bp[0],bp[1])
+                            events.append({"t":round(time.time(),2),"action":"forward_only_event_back",
+                                           "x":round(bp[0],1),"y":round(bp[1],1)})
+                            print("[VISION]",events[-1],flush=True)
+                            time.sleep(5)
+                            clean_frames=0
+                            continue
+                        page.screenshot(path=str(OUT/"forward_only_event_no_back.png"),full_page=True)
+                        abort_reason="无关闭 X 活动点前往后未识别到安全返回箭头；已保存现场"
+                        break
+
+'''
+if "forward_only_event_enter" not in s:
+    if handler_anchor not in s:
+        raise SystemExit("post-dongfu daily anchor not found")
+    s=s.replace(handler_anchor,handler+handler_anchor,1)
+
 start = s.find("def probe_existing_plant(page, events):")
 end = s.find("\n\nwith sync_playwright() as p:", start)
 if start < 0 or end < 0:
@@ -118,4 +181,4 @@ def probe_existing_plant(page, events):
 
 s = s[:start] + replacement + s[end:]
 p.write_text(s, encoding="utf-8")
-print("patched 6x6 grid harvest + Danjie entry")
+print("patched forward-only event + 6x6 grid harvest + Danjie entry")
