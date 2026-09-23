@@ -33,29 +33,35 @@ def management_panel_present(img):
 
 
 def vip_monthly_warning_present(img):
-    # 误点右侧“一键收获”后会出现月卡激活提示：中央浅色大框 + 左橙取消/右绿确定。
-    # 只在收获动作之后使用；一旦出现立即判失败，绝不继续把它当普通收获成功。
+    # 真正误点“一键收获”的月卡提示位于游戏画布内部：
+    # x≈250..690,y≈395..645 的大浅色弹窗，正文区几乎整块都是灰白底。
+    # #91 曾把正常丹界农田误报成月卡提示，因此必须先要求正文浅色占比很高，
+    # 再同时命中左橙“取消”和右绿“确定”。网页右侧常驻 VIP 权益栏完全不参与检测。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    modal=hsv[390:650,250:690]
-    if modal.size == 0:
+    body=hsv[430:645,250:690]
+    if body.size == 0:
         return False
-    pale=cv2.inRange(modal,np.array([0,0,145]),np.array([180,100,255]))
-    pale_frac=cv2.countNonZero(pale)/float(modal.shape[0]*modal.shape[1])
-    if pale_frac < 0.40:
+    pale=cv2.inRange(body,np.array([0,0,145]),np.array([180,100,255]))
+    pale_frac=cv2.countNonZero(pale)/float(body.shape[0]*body.shape[1])
+    if pale_frac < 0.80:
         return False
 
-    def has_button(x0,y0,x1,y1,lo,hi):
+    def has_button(x0,y0,x1,y1,lo,hi,cx_lo,cx_hi,cy_lo,cy_hi):
         roi=hsv[y0:y1,x0:x1]
         mask=cv2.inRange(roi,np.array(lo),np.array(hi))
         n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
         for i in range(1,n):
             x,y,w,h,area=stats[i]
-            if area >= 1400 and w >= 80 and h >= 24:
+            cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+            if not (2500 <= area <= 6500 and 100 <= w <= 150 and 28 <= h <= 52):
+                continue
+            if cx_lo <= cx <= cx_hi and cy_lo <= cy <= cy_hi:
                 return True
         return False
 
-    return (has_button(290,560,455,635,[0,70,100],[30,255,255]) and
-            has_button(500,560,660,635,[35,45,80],[100,255,255]))
+    left=has_button(290,565,455,635,[0,70,100],[30,255,255],350,395,595,615)
+    right=has_button(495,565,660,635,[35,45,80],[100,255,255],550,600,595,615)
+    return left and right
 
 
 def harvest_popup_point_for_plot(img,plot_x,plot_y):
@@ -120,4 +126,4 @@ if needle in s:
 s=s.replace("page.mouse.click(470,730)","page.mouse.click(470,430)")
 
 p.write_text(s,encoding="utf-8")
-print("patched skin-hand ordinary harvest + VIP guard + safe dismiss point")
+print("patched skin-hand ordinary harvest + strict VIP warning guard + safe dismiss point")
