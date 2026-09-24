@@ -16,6 +16,34 @@ elif needle_575 in s:
 else:
     raise SystemExit("dongfu menu detector block not found in 575/625 form")
 
+# #110 现场仍是原来的“某某星君/某某后期/本次登录不再提示”人物覆盖层，
+# 只是境界牌从旧版橙色换成了蓝紫色。复用原 profile_overlay_present 逻辑，
+# 只把颜色识别扩成“橙牌 OR 蓝紫牌”，不改变安全点击位置。
+profile_start=s.find("def profile_overlay_present(img):")
+profile_end=s.find("\ndef main_dongfu_point(img):",profile_start)
+if profile_start < 0 or profile_end < 0:
+    raise SystemExit("profile_overlay_present block not found")
+profile_override=r'''def profile_overlay_present(img):
+    # 点洞府后偶发人物覆盖层：标题/人物会换皮，底部都有“某某后期”境界牌。
+    # 旧版牌子是橙色，#110 的“天仙后期”改成蓝紫色；两种都接受。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=400,700,550,780
+    roi=hsv[y0:y1,x0:x1]
+    orange=cv2.inRange(roi,np.array([0,70,100]),np.array([35,255,255]))
+    blueviolet=cv2.inRange(roi,np.array([105,40,80]),np.array([160,255,255]))
+    mask=cv2.bitwise_or(orange,blueviolet)
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if area >= 1200 and 85 <= w <= 140 and 26 <= h <= 60 and 450 <= cx <= 500 and 720 <= cy <= 760:
+            return True
+    return False
+
+
+'''
+s=s[:profile_start]+profile_override+s[profile_end+1:]
+
 # #108 卡死原因不是丹界菜单识别，而是公告页右上区域的亮色标题/边框
 # 被通用 modal_close_point 当成关闭 X。#107 也曾连续误点同一坐标，只是后来侥幸恢复。
 # 真 X 在不同公告上会有少量漂移，但自身始终是约 20~30px 的近方形亮色符号；
@@ -138,4 +166,4 @@ if post_anchor not in s:
 s=s.replace(post_anchor,post_replacement,1)
 
 p.write_text(s, encoding="utf-8")
-print("patched strict dongfu-menu guard + strict modal X + #109 festival-offer close + stale-X cooldown; keep x=625")
+print("patched strict menu/modal + festival offer + orange/blue-violet profile overlay; keep x=625")
