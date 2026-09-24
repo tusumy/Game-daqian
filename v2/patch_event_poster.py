@@ -60,4 +60,4 @@ if profile_old not in s:
 s=s.replace(profile_old,profile_new,1)
 
 p.write_text(s,encoding="utf-8")
-print("patched #115 prioritized event-poster close before profile overlay")
+print("patched #115 event-poster priority + profile guard")
