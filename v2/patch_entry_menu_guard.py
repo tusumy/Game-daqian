@@ -74,5 +74,68 @@ if stuck_old not in s:
     raise SystemExit("outer modal stuck branch not found")
 s = s.replace(stuck_old, stuck_new, 1)
 
+# #109 现场：关闭公告后能正确点到洞府，但随即出现“节日欢庆豪礼”购买层。
+# 这个层右上不是普通白 X，而是粉/蓝圆片里的交叉图标；如果把通用 X 放宽去吃它，
+# 会重新引入 #108 的误识别。因此给这个购买层做单独、结构化识别。
+festival_helper = r'''def festival_offer_close_point(img):
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+
+    # 右上装饰关闭钮由大块粉色圆片 + 大块青蓝圆片叠在一起，
+    # #109 实测两块面积都在 2k 左右；公告白页没有这组组合。
+    x0,y0,x1,y1=600,170,690,275
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+
+    cyan=cv2.inRange(roi,np.array([80,60,80]),np.array([110,255,255]))
+    pink=cv2.inRange(roi,np.array([145,45,100]),np.array([179,255,255]))
+
+    def has_big(mask,area_lo,area_hi,w_lo,w_hi,h_lo,h_hi,cx_lo,cx_hi,cy_lo,cy_hi):
+        n,labels,stats,cent=cv2.connectedComponentsWithStats(mask)
+        for i in range(1,n):
+            x,y,w,h,area=stats[i]
+            cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+            if not (area_lo <= area <= area_hi and w_lo <= w <= w_hi and h_lo <= h <= h_hi):
+                continue
+            if cx_lo <= cx <= cx_hi and cy_lo <= cy <= cy_hi:
+                return True
+        return False
+
+    if not has_big(cyan,1500,3800,45,75,45,80,620,646,228,262):
+        return None
+    if not has_big(pink,1400,3800,45,80,50,90,612,642,182,218):
+        return None
+
+    # 两块彩色圆片命中后，再只在交叉图标的小窗口里找白/浅金亮部。
+    bx0,by0,bx1,by1=625,190,665,235
+    broi=hsv[by0:by1,bx0:bx1]
+    bright=cv2.inRange(broi,np.array([0,0,175]),np.array([180,100,255]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(bright)
+    best=None
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+bx0); cy=float(cent[i][1]+by0)
+        if not (120 <= area <= 500 and 16 <= w <= 32 and 18 <= h <= 36):
+            continue
+        if not (636 <= cx <= 652 and 207 <= cy <= 226):
+            continue
+        score=abs(cx-643.5)+abs(cy-216.0)
+        if best is None or score < best[0]:
+            best=(score,(cx,cy))
+    return best[1] if best else None
+
+
+'''
+helper_anchor="def modal_close_point(img):"
+if helper_anchor not in s:
+    raise SystemExit("modal helper anchor not found")
+s=s.replace(helper_anchor,festival_helper+helper_anchor,1)
+
+post_anchor = '''                    # 充值推广类黄色 X。\n                    yp=promo_yellow_x_point(shot)\n'''
+post_replacement = '''                    # #109 的“节日欢庆豪礼”购买层：右上粉蓝交叉图标关闭。\n                    fp=None\n                    if time.time() >= last_click.get("festival_offer_retry_after",0):\n                        fp=festival_offer_close_point(shot)\n                    if fp:\n                        before_close=shot\n                        page.mouse.click(fp[0],fp[1])\n                        time.sleep(2)\n                        after_close=screenshot_img(page)\n                        change=scene_change_score(before_close,after_close)\n                        events.append({"t":round(time.time(),2),"action":"post_dongfu_festival_offer_x",\n                                       "x":round(fp[0],1),"y":round(fp[1],1),\n                                       "scene_change":round(change,2)})\n                        print("[VISION]",events[-1],flush=True)\n                        if change >= 2.0:\n                            clear_count+=1\n                            clean_frames=0\n                            time.sleep(4)\n                            continue\n                        last_click["festival_offer_retry_after"]=time.time()+15\n                        page.screenshot(path=str(OUT/"festival_offer_stuck.png"),full_page=True)\n\n                    # 充值推广类黄色 X。\n                    yp=promo_yellow_x_point(shot)\n'''
+if post_anchor not in s:
+    raise SystemExit("post-dongfu promo anchor not found")
+s=s.replace(post_anchor,post_replacement,1)
+
 p.write_text(s, encoding="utf-8")
-print("patched strict dongfu-menu guard + strict modal X shape + stale-X cooldown; keep x=625")
+print("patched strict dongfu-menu guard + strict modal X + #109 festival-offer close + stale-X cooldown; keep x=625")
