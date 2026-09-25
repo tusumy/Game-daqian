@@ -16,16 +16,43 @@ elif needle_575 in s:
 else:
     raise SystemExit("dongfu menu detector block not found in 575/625 form")
 
-# #110 现场仍是原来的“某某星君/某某后期/本次登录不再提示”人物覆盖层，
-# 只是境界牌从旧版橙色换成了蓝紫色。复用原 profile_overlay_present 逻辑，
-# 只把颜色识别扩成“橙牌 OR 蓝紫牌”，不改变安全点击位置。
+# #110/#122 人物登录覆盖层：标题、人物、境界牌都会换皮。
+# 老版本可用橙/蓝紫境界牌识别；#122“大乘修罗神”没有旧位置的境界牌，
+# 但左下“本次登录不再提示”的金色空心圈仍稳定出现。
 profile_start=s.find("def profile_overlay_present(img):")
 profile_end=s.find("\ndef main_dongfu_point(img):",profile_start)
 if profile_start < 0 or profile_end < 0:
     raise SystemExit("profile_overlay_present block not found")
-profile_override=r'''def profile_overlay_present(img):
-    # 点洞府后偶发人物覆盖层：标题/人物会换皮，底部都有“某某后期”境界牌。
-    # 旧版牌子是橙色，#110 的“天仙后期”改成蓝紫色；两种都接受。
+profile_override=r'''def profile_no_remind_point(img):
+    # 人物登录覆盖层左下“本次登录不再提示”的金色空心圈。
+    # #122 实测中心约 (310.6,870.9)，20x21；位置与普通活动海报
+    # 右下“今日不再提示”完全不同，因此单独检测。
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    x0,y0,x1,y1=295,855,330,892
+    roi=hsv[y0:y1,x0:x1]
+    if roi.size == 0:
+        return None
+    gold=cv2.inRange(roi,np.array([5,30,50]),np.array([35,220,230]))
+    n,labels,stats,cent=cv2.connectedComponentsWithStats(gold)
+    candidates=[]
+    for i in range(1,n):
+        x,y,w,h,area=stats[i]
+        cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
+        if not (60 <= area <= 220 and 14 <= w <= 26 and 14 <= h <= 27):
+            continue
+        if not (303 <= cx <= 318 and 864 <= cy <= 879):
+            continue
+        score=abs(w-h)+abs(cx-310.5)+abs(cy-871.0)
+        candidates.append((score,-area,(cx,cy)))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda z:(z[0],z[1]))
+    return candidates[0][2]
+
+
+def profile_overlay_present(img):
+    # 点洞府后偶发人物覆盖层。旧版底部有橙/蓝紫境界牌；新版人物可以
+    # 完全换布局，因此再用“本次登录不再提示”圆圈 + 游戏区明显压暗作兜底。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     x0,y0,x1,y1=400,700,550,780
     roi=hsv[y0:y1,x0:x1]
@@ -38,11 +65,28 @@ profile_override=r'''def profile_overlay_present(img):
         cx=float(cent[i][0]+x0); cy=float(cent[i][1]+y0)
         if area >= 1200 and 85 <= w <= 140 and 26 <= h <= 60 and 450 <= cx <= 500 and 720 <= cy <= 760:
             return True
+
+    # #122“大乘修罗神”：旧境界牌消失，但不再提示圆圈仍在。
+    pnr=profile_no_remind_point(img)
+    if pnr:
+        gray=cv2.cvtColor(img[160:900,228:712],cv2.COLOR_BGR2GRAY)
+        if gray.size:
+            dark_frac=float(np.mean(gray < 80))
+            if dark_frac >= 0.55:
+                return True
     return False
 
 
 '''
 s=s[:profile_start]+profile_override+s[profile_end+1:]
+
+# 人物覆盖层一旦命中，先勾“本次登录不再提示”，再点左侧空白推进/关闭。
+# 旧覆盖层若没有识别到该圆圈，则保持原有安全点击行为。
+profile_branch_old='''                    if profile_overlay_present(shot):\n                        page.mouse.click(250,700)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
+profile_branch_new='''                    if profile_overlay_present(shot):\n                        pnr=profile_no_remind_point(shot)\n                        if pnr:\n                            page.mouse.click(pnr[0],pnr[1])\n                            time.sleep(0.7)\n                        page.mouse.click(250,700)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0,\n                                       "no_remind_x":round(pnr[0],1) if pnr else None,\n                                       "no_remind_y":round(pnr[1],1) if pnr else None})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
+if profile_branch_old not in s:
+    raise SystemExit("profile overlay runtime branch not found")
+s=s.replace(profile_branch_old,profile_branch_new,1)
 
 # #108 卡死原因不是丹界菜单识别，而是公告页右上区域的亮色标题/边框
 # 被通用 modal_close_point 当成关闭 X。#107 也曾连续误点同一坐标，只是后来侥幸恢复。
@@ -166,4 +210,4 @@ if post_anchor not in s:
 s=s.replace(post_anchor,post_replacement,1)
 
 p.write_text(s, encoding="utf-8")
-print("patched strict menu/modal + festival offer + orange/blue-violet profile overlay; keep x=625")
+print("patched strict menu/modal + generic login profile overlay + festival offer; keep x=625")
