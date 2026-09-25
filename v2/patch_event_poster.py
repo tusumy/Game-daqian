@@ -3,10 +3,11 @@ from pathlib import Path
 p=Path("v2/probe_popup.py")
 s=p.read_text(encoding="utf-8")
 
-# #111/#115/#117 现场：活动海报底部稳定带“今日不再提示”，
+# #111/#115/#117/#121 现场：活动海报底部常带“今日不再提示”，
 # 右上关闭 X 会换皮：东海寻珍是米黄色，归墟战场则是偏白金色。
-# #115 还证明这类海报会被较宽松的 profile_overlay_present 抢先误认，
-# 所以结构化海报关闭必须放到“资料提示层”之前处理。
+# #121 又证明复选框在已经勾过后会改变外观，today_no_remind_point 可能识别不到，
+# 因此“检测到复选框”不能再作为关闭海报的前置条件；应优先认严格位置的 X，
+# 复选框能找到就顺手勾，找不到也照样关海报。
 helper_anchor="def modal_close_point(img):"
 if helper_anchor not in s:
     raise SystemExit("modal helper anchor not found")
@@ -35,9 +36,8 @@ event_helper=r'''def event_poster_close_point(img):
         candidates.sort(key=lambda z:(z[0],z[1]))
         return candidates[0][2]
 
-    # 第二类：#117 “归墟战场”等白金色 X。
-    # 只在已经检测到“今日不再提示”的前提下调用本函数，因此可以把 X 的
-    # 颜色放宽到低饱和高亮，但仍严格限制尺寸与右上位置，避免误点海报内容。
+    # 第二类：#117/#121 “归墟战场”等白金色 X。
+    # 位置和尺寸保持严格，避免把海报内容或普通 UI 高亮误当关闭键。
     x0,y0,x1,y1=610,190,680,260
     roi=hsv[y0:y1,x0:x1]
     pale=cv2.inRange(roi,np.array([0,0,180]),np.array([180,120,255]))
@@ -71,17 +71,16 @@ post_anchor='''                    # 资料提示层：点旁边暗处。\n'''
 if post_anchor not in s:
     raise SystemExit("profile overlay anchor not found")
 
-event_block='''                    # 带“今日不再提示”的换皮活动海报：\n                    # 先用底部复选框确认海报结构，再识别右上关闭 X。\n                    ep_chk=today_no_remind_point(shot)\n                    ep=None\n                    if ep_chk and time.time() >= last_click.get("event_poster_retry_after",0):\n                        ep=event_poster_close_point(shot)\n                    if ep:\n                        # 先勾本次不再提示，避免同一次登录里再次挡住洞府。\n                        page.mouse.click(ep_chk[0],ep_chk[1])\n                        time.sleep(0.8)\n                        before_close=screenshot_img(page)\n                        page.mouse.click(ep[0],ep[1])\n                        time.sleep(2)\n                        after_close=screenshot_img(page)\n                        change=scene_change_score(before_close,after_close)\n                        events.append({"t":round(time.time(),2),"action":"post_dongfu_event_poster_x",\n                                       "x":round(ep[0],1),"y":round(ep[1],1),\n                                       "checkbox_x":round(ep_chk[0],1),"checkbox_y":round(ep_chk[1],1),\n                                       "scene_change":round(change,2)})\n                        print("[VISION]",events[-1],flush=True)\n                        if change >= 2.0:\n                            clear_count+=1\n                            clean_frames=0\n                            time.sleep(4)\n                            continue\n                        last_click["event_poster_retry_after"]=time.time()+15\n                        page.screenshot(path=str(OUT/"event_poster_stuck.png"),full_page=True)\n\n'''
+event_block='''                    # 换皮活动海报：先严格识别右上关闭 X。\n                    # “今日不再提示”能识别到就顺手勾；已经勾过导致复选框变样时，\n                    # 也不能阻止关闭海报。#121 就是卡在这个状态。\n                    ep_chk=today_no_remind_point(shot)\n                    ep=None\n                    if time.time() >= last_click.get("event_poster_retry_after",0):\n                        ep=event_poster_close_point(shot)\n                    if ep:\n                        if ep_chk:\n                            page.mouse.click(ep_chk[0],ep_chk[1])\n                            time.sleep(0.8)\n                        before_close=screenshot_img(page)\n                        page.mouse.click(ep[0],ep[1])\n                        time.sleep(2)\n                        after_close=screenshot_img(page)\n                        change=scene_change_score(before_close,after_close)\n                        events.append({"t":round(time.time(),2),"action":"post_dongfu_event_poster_x",\n                                       "x":round(ep[0],1),"y":round(ep[1],1),\n                                       "checkbox_x":round(ep_chk[0],1) if ep_chk else None,\n                                       "checkbox_y":round(ep_chk[1],1) if ep_chk else None,\n                                       "scene_change":round(change,2)})\n                        print("[VISION]",events[-1],flush=True)\n                        if change >= 2.0:\n                            clear_count+=1\n                            clean_frames=0\n                            time.sleep(4)\n                            continue\n                        last_click["event_poster_retry_after"]=time.time()+15\n                        page.screenshot(path=str(OUT/"event_poster_stuck.png"),full_page=True)\n\n'''
 s=s.replace(post_anchor,event_block+post_anchor,1)
 
-# 第二道硬保护：只要当前画面存在“今日不再提示”复选框，就不允许
-# profile_overlay_present 抢先吞掉它。这样即使以后海报 X 再换皮，
-# 也不会退回 #115 那种连续 officer_profile_advance 空点。
+# 第二道硬保护：只要严格位置的活动海报 X 还在，或者仍能识别到
+# “今日不再提示”，就不允许 profile_overlay_present 抢先吞掉它。
 profile_old='''                    if profile_overlay_present(shot):\n'''
-profile_new='''                    if not today_no_remind_point(shot) and profile_overlay_present(shot):\n'''
+profile_new='''                    if not event_poster_close_point(shot) and not today_no_remind_point(shot) and profile_overlay_present(shot):\n'''
 if profile_old not in s:
     raise SystemExit("profile overlay branch not found")
 s=s.replace(profile_old,profile_new,1)
 
 p.write_text(s,encoding="utf-8")
-print("patched #117 generic checkbox event-poster close + profile guard")
+print("patched #121 event-poster close independent of checkbox state + profile guard")
