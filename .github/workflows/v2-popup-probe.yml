@@ -37,27 +37,46 @@ jobs:
       - run: |
           pip install playwright opencv-python-headless numpy opencv-python-headless
           playwright install --with-deps chromium
-      - name: Restore latest accepted game state
+      - name: Restore latest available game state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm -rf /tmp/xddq29
           mkdir -p /tmp/xddq29
 
-          PREV_RUN="$(gh run list --workflow v2-popup-probe.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
-          if [ -n "$PREV_RUN" ]; then
-            echo "Restoring auth state from previous successful probe run $PREV_RUN"
-            gh run download "$PREV_RUN" -p 'xddq-auth-state-*' -D /tmp/xddq29
-          else
-            echo "No previous successful probe run found; using bootstrap state"
+          # Do not restore only from a successful workflow run. A probe may fail later
+          # after it has already closed daily popups and saved a newer valid browser state.
+          # Walk recent runs newest-first and use the first one that actually contains
+          # an auth-state artifact, regardless of the run's final conclusion.
+          RESTORED_RUN=""
+          for RUN_ID in $(gh run list --workflow v2-popup-probe.yml --branch main --limit 15 --json databaseId --jq '.[].databaseId'); do
+            if [ "$RUN_ID" = "$GITHUB_RUN_ID" ]; then
+              continue
+            fi
+
+            rm -rf /tmp/xddq29/candidate
+            mkdir -p /tmp/xddq29/candidate
+            if gh run download "$RUN_ID" -p 'xddq-auth-state-*' -D /tmp/xddq29/candidate >/dev/null 2>&1; then
+              STATE_FILE="$(find /tmp/xddq29/candidate -name storage_state.json -print -quit)"
+              if [ -n "$STATE_FILE" ] && [ -f "$STATE_FILE" ]; then
+                cp "$STATE_FILE" /tmp/xddq29/storage_state.json
+                RESTORED_RUN="$RUN_ID"
+                echo "Restored latest available auth state from run $RUN_ID"
+                break
+              fi
+            fi
+          done
+
+          if [ -z "$RESTORED_RUN" ]; then
+            echo "No recent auth-state artifact found; using bootstrap state"
             gh run download 35562579777 -n xddq-auth-state-29 -D /tmp/xddq29
+            STATE_FILE="$(find /tmp/xddq29 -name storage_state.json -print -quit)"
+            test -n "$STATE_FILE"
+            if [ "$STATE_FILE" != "/tmp/xddq29/storage_state.json" ]; then
+              cp "$STATE_FILE" /tmp/xddq29/storage_state.json
+            fi
           fi
 
-          STATE_FILE="$(find /tmp/xddq29 -name storage_state.json -print -quit)"
-          test -n "$STATE_FILE"
-          if [ "$STATE_FILE" != "/tmp/xddq29/storage_state.json" ]; then
-            cp "$STATE_FILE" /tmp/xddq29/storage_state.json
-          fi
           test -f /tmp/xddq29/storage_state.json
       - name: Apply V2 runtime patches
         run: |
