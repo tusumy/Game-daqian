@@ -128,12 +128,19 @@ if profile_old not in s:
 s=s.replace(profile_old,profile_new,1)
 
 # #123 证明人物层的“不再提示”会触发“以后无法获得对应奖励”确认框。
-# 所以人物层只关闭/推进，绝不再自动勾选该选项；检测坐标只保留在日志里便于诊断。
+# #124 又证明点左下背景只是误触底层奖励，人物层本身不会消失。
+# 现场人物层真正的引导入口是中下部“星宿福泽/击败……”任务条；
+# 这里改为点任务条，让既有的子页返回逻辑继续接管，同时绝不勾“不再提示”。
 unsafe_profile='''                    if not event_poster_close_point(shot) and not today_no_remind_point(shot) and profile_overlay_present(shot):\n                        pnr=profile_no_remind_point(shot)\n                        if pnr:\n                            page.mouse.click(pnr[0],pnr[1])\n                            time.sleep(0.7)\n                        page.mouse.click(250,700)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0,\n                                       "no_remind_x":round(pnr[0],1) if pnr else None,\n                                       "no_remind_y":round(pnr[1],1) if pnr else None})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
-safe_profile='''                    if not event_poster_close_point(shot) and not today_no_remind_point(shot) and profile_overlay_present(shot):\n                        pnr=profile_no_remind_point(shot)\n                        page.mouse.click(250,700)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0,\n                                       "no_remind_x":round(pnr[0],1) if pnr else None,\n                                       "no_remind_y":round(pnr[1],1) if pnr else None,\n                                       "no_remind_clicked":False})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
+safe_profile='''                    if not event_poster_close_point(shot) and not today_no_remind_point(shot) and profile_overlay_present(shot):\n                        pnr=profile_no_remind_point(shot)\n                        page.mouse.click(500,735)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_task_advance","x":500.0,"y":735.0,\n                                       "no_remind_x":round(pnr[0],1) if pnr else None,\n                                       "no_remind_y":round(pnr[1],1) if pnr else None,\n                                       "no_remind_clicked":False})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
 if unsafe_profile not in s:
-    raise SystemExit("unsafe profile no-remind branch not found")
-s=s.replace(unsafe_profile,safe_profile,1)
+    # #124 之后的安全版：仍是点背景，只是已禁止勾“不再提示”。
+    safe_old='''                    if not event_poster_close_point(shot) and not today_no_remind_point(shot) and profile_overlay_present(shot):\n                        pnr=profile_no_remind_point(shot)\n                        page.mouse.click(250,700)\n                        last_click["officer_flow_seen"]=time.time()\n                        events.append({"t":round(time.time(),2),"action":"officer_profile_advance","x":250.0,"y":700.0,\n                                       "no_remind_x":round(pnr[0],1) if pnr else None,\n                                       "no_remind_y":round(pnr[1],1) if pnr else None,\n                                       "no_remind_clicked":False})\n                        print("[VISION]",events[-1],flush=True)\n                        time.sleep(4)\n                        continue\n'''
+    if safe_old not in s:
+        raise SystemExit("profile branch not found in unsafe/safe forms")
+    s=s.replace(safe_old,safe_profile,1)
+else:
+    s=s.replace(unsafe_profile,safe_profile,1)
 
 p.write_text(s,encoding="utf-8")
-print("patched #123 reward-safe profile confirm cancel + event poster guard")
+print("patched #124 profile task CTA + reward-safe confirm cancel + event poster guard")
