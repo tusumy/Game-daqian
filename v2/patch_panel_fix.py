@@ -9,6 +9,7 @@ if anchor not in s:
 
 overrides=r'''def plant_panel_present(img):
     # 真正的选种面板会一直延伸到 y≈860；“浇水/锄除”管理面板只到 y≈735。
+    # 不再依赖“灵植/造化灵植”标签的死颜色，避免空地因换肤被误判 occupied。
     hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     roi=hsv[740:860,250:700]
     if roi.size == 0:
@@ -129,5 +130,15 @@ s=s.replace("page.mouse.click(470,730)","page.mouse.click(470,430)")
 # 仍要求选种面板出现并且棕色占比至少下降 0.12，避免把未种上的空地算成功。
 s=s.replace("before_tan-0.18","before_tan-0.12")
 
+# #131：感悟升级也有绿色“前往”，曾被 forward_only_event_button 误当活动入口。
+# 只要升级弹窗的“取消/前往”双按钮成立，forward-only 活动识别必须让路给 upgrade_cancel_point。
+fwd_anchor="def forward_only_event_button(img):\n"
+if fwd_anchor in s:
+    fwd_start=s.find(fwd_anchor)
+    fwd_head=s[fwd_start:fwd_start+220]
+    if "upgrade_cancel_point(img)" not in fwd_head:
+        s=s.replace(fwd_anchor,
+                    fwd_anchor+"    if upgrade_cancel_point(img):\n        return None\n",1)
+
 p.write_text(s,encoding="utf-8")
-print("patched skin-hand ordinary harvest + strict VIP warning guard + safe dismiss point + tolerant plant verify")
+print("patched structural plant panel + VIP guard + upgrade-modal forward guard")
