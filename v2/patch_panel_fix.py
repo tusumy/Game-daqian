@@ -130,7 +130,7 @@ s=s.replace("page.mouse.click(470,730)","page.mouse.click(470,430)")
 # 仍要求选种面板出现并且棕色占比至少下降 0.12，避免把未种上的空地算成功。
 s=s.replace("before_tan-0.18","before_tan-0.12")
 
-# #131：感悟升级也有绿色“前往”，曾被 forward_only_event_button 误当活动入口。
+# #131/#133：感悟升级也可能有绿色“前往”，曾被 forward_only_event_button 误当活动入口。
 # 只要升级弹窗的“取消/前往”双按钮成立，forward-only 活动识别必须让路给 upgrade_cancel_point。
 fwd_anchor="def forward_only_event_button(img):\n"
 if fwd_anchor in s:
@@ -140,5 +140,14 @@ if fwd_anchor in s:
         s=s.replace(fwd_anchor,
                     fwd_anchor+"    if upgrade_cancel_point(img):\n        return None\n",1)
 
+# #133 “神猿禁地”：点“立即前往”后不是进入子页，而是直接回到游戏主界面。
+# 旧逻辑强制要求左上返回箭头，因此把一次正常、安全的返回误判成失败。
+# 如果点前往后已经重新看到主界面洞府锚点，就直接继续流程；只有既无返回箭头、
+# 又不是主界面时，才保留原来的保守中止。
+old_no_back='''                        page.screenshot(path=str(OUT/"forward_only_event_no_back.png"),full_page=True)\n                        abort_reason="无关闭 X 活动点前往后未识别到安全返回箭头；已保存现场"\n                        break\n'''
+new_no_back='''                        if main_dongfu_point(entered):\n                            events.append({"t":round(time.time(),2),"action":"forward_only_event_returned_main",\n                                           "x":round(fp[0],1),"y":round(fp[1],1)})\n                            print("[VISION]",events[-1],flush=True)\n                            clean_frames=0\n                            time.sleep(2)\n                            continue\n                        page.screenshot(path=str(OUT/"forward_only_event_no_back.png"),full_page=True)\n                        abort_reason="无关闭 X 活动点前往后既未返回主界面，也未识别到安全返回箭头；已保存现场"\n                        break\n'''
+if old_no_back in s:
+    s=s.replace(old_no_back,new_no_back,1)
+
 p.write_text(s,encoding="utf-8")
-print("patched structural plant panel + VIP guard + upgrade-modal forward guard")
+print("patched structural plant panel + VIP guard + forward-only direct-main return")
