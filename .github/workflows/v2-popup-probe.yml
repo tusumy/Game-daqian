@@ -83,8 +83,8 @@ jobs:
           python v2/patch_grid_harvest.py
           python v2/patch_entry_menu_guard.py
           python v2/patch_event_poster.py
-          python v2/patch_panel_fix.py
           python v2/patch_plant_verify.py
+          python v2/patch_panel_fix.py
       - run: python v2/probe_popup.py
       - name: Preserve auth state
         if: always()
