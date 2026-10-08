@@ -90,5 +90,92 @@ replacement = r'''        # 外层晚到活动海报必须优先走专用海报 
 '''
 
 s = s[:start] + replacement + s[end:]
+
+# #178: Festival monthly-card promotion hides the cave entrance.
+# Its *white* X is centred near (629,310), not the older yellow promo X (660,302).
+# Require the card's warm palette AND a tightly located white X; do not click purchase UI.
+festival_anchor = "def promo_yellow_x_point(img):\n"
+festival_helper = r'''def festival_month_card_x_point(img):
+    """Recognize the 30-day orange monthly-card popup by independent visual cues."""
+    if img is None or img.shape[0] < 920 or img.shape[1] < 1000:
+        return None
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    warm=hsv[380:465,320:650]
+    warm_mask=cv2.inRange(warm,np.array([0,90,100]),np.array([22,255,255]))
+    if cv2.countNonZero(warm_mask)/float(warm.shape[0]*warm.shape[1]) < 0.50:
+        return None
+    heading=hsv[230:350,355:560]
+    heading_mask=cv2.inRange(heading,np.array([0,80,90]),np.array([23,255,255]))
+    if cv2.countNonZero(heading_mask)/float(heading.shape[0]*heading.shape[1]) < 0.32:
+        return None
+    x0,y0,x1,y1=608,289,650,332
+    close=hsv[y0:y1,x0:x1]
+    white=cv2.inRange(close,np.array([0,0,190]),np.array([180,90,255]))
+    count,labels,stats,centers=cv2.connectedComponentsWithStats(white)
+    for i in range(1,count):
+        x,y,w,h,area=[int(v) for v in stats[i]]
+        cx=float(centers[i][0]+x0)
+        cy=float(centers[i][1]+y0)
+        if 130 <= area <= 380 and 17 <= w <= 33 and 18 <= h <= 36 and 620 <= cx <= 639 and 300 <= cy <= 322:
+            return (cx,cy)
+    return None
+
+'''
+if s.count(festival_anchor) != 1:
+    raise SystemExit("festival promo helper anchor missing or repeated")
+s=s.replace(festival_anchor,festival_helper+festival_anchor,1)
+
+# The popup may arrive before the first cave click, or afterwards inside cleanup.
+outer_anchor="        action=None\n"
+outer_block=r'''        # Close only this known monthly-card overlay before attempting cave navigation.
+        if not action:
+            fx=festival_month_card_x_point(img)
+            if fx:
+                page.mouse.click(fx[0],fx[1])
+                time.sleep(2)
+                after_festival=screenshot_img(page)
+                still_festival=festival_month_card_x_point(after_festival) is not None
+                events.append({"t":round(time.time(),2),"action":"festival_card_close",
+                               "x":round(fx[0],1),"y":round(fx[1],1),
+                               "scene_change":round(scene_change_score(img,after_festival),2),
+                               "still_visible":still_festival})
+                print("[VISION]",events[-1],flush=True)
+                if still_festival:
+                    page.screenshot(path=str(OUT/"festival_card_stuck.png"),full_page=True)
+                    abort_reason="节日月卡关闭后仍然可见，已停止重试"
+                continue
+
+'''
+if s.count(outer_anchor) != 1:
+    raise SystemExit("outer action anchor missing or repeated")
+s=s.replace(outer_anchor,outer_anchor+outer_block,1)
+
+inner_anchor="                while time.time()<cleanup_deadline:\n                    shot=screenshot_img(page)\n"
+inner_block=r'''                    # This popup overlays the cave menu. Close and re-check once,
+                    # instead of repeatedly clicking a wrong yellow-X coordinate.
+                    fx=festival_month_card_x_point(shot)
+                    if fx:
+                        page.mouse.click(fx[0],fx[1])
+                        time.sleep(2)
+                        after_festival=screenshot_img(page)
+                        still_festival=festival_month_card_x_point(after_festival) is not None
+                        events.append({"t":round(time.time(),2),"action":"post_dongfu_festival_card_close",
+                                       "x":round(fx[0],1),"y":round(fx[1],1),
+                                       "scene_change":round(scene_change_score(shot,after_festival),2),
+                                       "still_visible":still_festival})
+                        print("[VISION]",events[-1],flush=True)
+                        if still_festival:
+                            page.screenshot(path=str(OUT/"festival_card_stuck.png"),full_page=True)
+                            abort_reason="节日月卡关闭后仍然可见，已停止重试"
+                            break
+                        clear_count+=1
+                        clean_frames=0
+                        continue
+
+'''
+if s.count(inner_anchor) != 1:
+    raise SystemExit("inner cave cleanup anchor missing or repeated")
+s=s.replace(inner_anchor,inner_anchor+inner_block,1)
+
 p.write_text(s, encoding="utf-8")
 print("patched #142 xuanjing poster detector + outer event priority")
