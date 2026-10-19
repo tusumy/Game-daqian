@@ -2,7 +2,7 @@ name: 自动打理大千药田 V2
 
 on:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '17 */3 * * *'
   push:
     branches: [main]
     paths:
