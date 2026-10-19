@@ -217,5 +217,95 @@ if "def profile_overlay_present(img):" not in s:
     raise SystemExit("strict officer profile detector is missing")
 s=s.replace(outer_officer_anchor,outer_officer_block+outer_officer_anchor,1)
 
+# #222: "仙桃乐宴" event-detail modal arrived after the "仙阁雅宴"
+# entry card, before the script could reach Dongfu.  Detect the actual cyan
+# event panel and its pink title as independent cues.  Never guess an X from
+# the main game screen.
+banquet_helper_anchor="def promo_yellow_x_point(img):\n"
+banquet_helper=r'''def xiantao_banquet_close_point(img):
+    # #222 screenshots: full-screen event panel, pale cyan body and pink heading.
+    # Fixed 1280x960 viewport; X on the event panel near (669,235).
+    if img is None or img.shape[0] < 920 or img.shape[1] < 1000:
+        return None
+    hsv=cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    body=hsv[425:780,285:640]
+    cyan=cv2.inRange(body,np.array([75,15,100]),np.array([110,190,255]))
+    body_fraction=cv2.countNonZero(cyan)/float(body.shape[0]*body.shape[1])
+    title=hsv[175:258,320:590]
+    pink=cv2.inRange(title,np.array([145,30,85]),np.array([179,255,255]))
+    title_fraction=cv2.countNonZero(pink)/float(title.shape[0]*title.shape[1])
+    close=hsv[220:252,660:680]
+    pale=cv2.inRange(close,np.array([0,0,175]),np.array([55,170,255]))
+    close_fraction=cv2.countNonZero(pale)/float(close.shape[0]*close.shape[1])
+    if body_fraction >= 0.84 and title_fraction >= 0.12 and close_fraction >= 0.22:
+        return (669.0,235.0)
+    return None
+
+
+'''
+if s.count(banquet_helper_anchor) != 1:
+    raise SystemExit("banquet helper anchor missing or repeated")
+s=s.replace(banquet_helper_anchor,banquet_helper+banquet_helper_anchor,1)
+
+# Keep the existing officer and VIP protections.  Close only after confirming
+# the event is present, and fail safely with a screenshot if the overlay stays.
+banquet_outer_anchor='''        # SDK 登录初始化失败：优先点绿色“重启”，再等待游戏重新拉起。
+'''
+banquet_outer=r'''        # #222: 仙桃乐宴遮住主界面时，先关活动详情页再找洞府。
+        if not action:
+            bp=xiantao_banquet_close_point(img)
+            if bp:
+                page.screenshot(path=str(OUT/"before_xiantao_banquet_close.png"),full_page=True)
+                page.mouse.click(bp[0],bp[1])
+                time.sleep(3)
+                after_banquet=screenshot_img(page)
+                still_banquet=xiantao_banquet_close_point(after_banquet) is not None
+                events.append({"t":round(time.time(),2),"action":"xiantao_banquet_close",
+                               "x":bp[0],"y":bp[1],
+                               "still_visible":still_banquet,
+                               "scene_change":round(scene_change_score(img,after_banquet),2)})
+                print("[VISION]",events[-1],flush=True)
+                if still_banquet:
+                    page.screenshot(path=str(OUT/"xiantao_banquet_stuck.png"),full_page=True)
+                    abort_reason="仙桃乐宴活动弹窗关闭后仍然可见，停止盲点"
+                else:
+                    page.screenshot(path=str(OUT/"after_xiantao_banquet_close.png"),full_page=True)
+                continue
+
+'''
+if s.count(banquet_outer_anchor)!=1:
+    raise SystemExit("banquet outer anchor missing or repeated")
+s=s.replace(banquet_outer_anchor,banquet_outer+banquet_outer_anchor,1)
+
+banquet_inner_anchor='''                    # 先识别新版洞府菜单；当前 UI 需要在菜单右下再点一次“丹界”。
+'''
+banquet_inner=r'''                    # #222: 同一活动详情页也可能在点洞府之后弹出。
+                    bp=xiantao_banquet_close_point(shot)
+                    if bp:
+                        page.screenshot(path=str(OUT/"before_post_dongfu_xiantao_close.png"),full_page=True)
+                        page.mouse.click(bp[0],bp[1])
+                        time.sleep(3)
+                        after_banquet=screenshot_img(page)
+                        still_banquet=xiantao_banquet_close_point(after_banquet) is not None
+                        events.append({"t":round(time.time(),2),
+                                       "action":"post_dongfu_xiantao_banquet_close",
+                                       "x":bp[0],"y":bp[1],
+                                       "still_visible":still_banquet,
+                                       "scene_change":round(scene_change_score(shot,after_banquet),2)})
+                        print("[VISION]",events[-1],flush=True)
+                        if still_banquet:
+                            page.screenshot(path=str(OUT/"xiantao_banquet_stuck.png"),full_page=True)
+                            abort_reason="仙桃乐宴活动弹窗关闭后仍然可见，停止盲点"
+                            break
+                        clear_count+=1
+                        clean_frames=0
+                        page.screenshot(path=str(OUT/"after_post_dongfu_xiantao_close.png"),full_page=True)
+                        continue
+
+'''
+if s.count(banquet_inner_anchor)!=1:
+    raise SystemExit("banquet inner anchor missing or repeated")
+s=s.replace(banquet_inner_anchor,banquet_inner+banquet_inner_anchor,1)
+
 p.write_text(s, encoding="utf-8")
 print("patched #142 xuanjing poster detector + outer event priority")
