@@ -177,5 +177,45 @@ if s.count(inner_anchor) != 1:
     raise SystemExit("inner cave cleanup anchor missing or repeated")
 s=s.replace(inner_anchor,inner_anchor+inner_block,1)
 
+# #220: the officer reward/profile overlay can cover the MAIN screen before
+# the first Dongfu click.  The existing profile detector was only used inside
+# the post-Dongfu cleanup loop; re-use that strict detector on the outer loop.
+# Do not tick "本次登录不再提示": it can forfeit the login reward.
+outer_officer_anchor='''        # SDK 登录初始化失败：优先点绿色“重启”，再等待游戏重新拉起。
+'''
+outer_officer_block=r'''        # #220: 仙官发玉/北斗星君人物层在洞府入口之前出现。
+        # 只在既有的严格人物层检测命中时，点 #125 已验证的安全背景位置；
+        # 不勾选“本次登录不再提示”，避免错过发玉奖励。
+        if not action and profile_overlay_present(img):
+            page.screenshot(path=str(OUT/"before_outer_officer_profile.png"),full_page=True)
+            before_officer=img
+            page.mouse.click(250,700)
+            time.sleep(4)
+            after_officer=screenshot_img(page)
+            still_visible=bool(profile_overlay_present(after_officer))
+            change=scene_change_score(before_officer,after_officer)
+            attempts=last_click.get("outer_officer_profile_attempts",0)+1
+            stalled=(last_click.get("outer_officer_profile_stalled",0)+1
+                     if still_visible and change < 2.0 else 0)
+            last_click["outer_officer_profile_attempts"]=attempts if still_visible else 0
+            last_click["outer_officer_profile_stalled"]=stalled
+            page.screenshot(path=str(OUT/"after_outer_officer_profile.png"),full_page=True)
+            events.append({"t":round(time.time(),2),"action":"outer_officer_profile_advance",
+                           "x":250.0,"y":700.0,"attempt":attempts,
+                           "scene_change":round(change,2),"still_visible":still_visible,
+                           "no_remind_clicked":False})
+            print("[VISION]",events[-1],flush=True)
+            if still_visible and (stalled >= 3 or attempts >= 8):
+                page.screenshot(path=str(OUT/"outer_officer_profile_stuck.png"),full_page=True)
+                abort_reason="仙官发玉人物层安全点击后仍未消失，已停止盲点"
+            continue
+
+'''
+if s.count(outer_officer_anchor) != 1:
+    raise SystemExit("outer officer profile anchor not found or repeated")
+if "def profile_overlay_present(img):" not in s:
+    raise SystemExit("strict officer profile detector is missing")
+s=s.replace(outer_officer_anchor,outer_officer_block+outer_officer_anchor,1)
+
 p.write_text(s, encoding="utf-8")
 print("patched #142 xuanjing poster detector + outer event priority")
