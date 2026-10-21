@@ -52,7 +52,9 @@ jobs:
           # Walk recent runs newest-first and use the first one that actually contains
           # an auth-state artifact, regardless of the run's final conclusion.
           RESTORED_RUN=""
-          for RUN_ID in $(gh run list --workflow v2-popup-probe.yml --branch main --limit 15 --json databaseId --jq '.[].databaseId'); do
+          # A successful QR login can refresh credentials even if the game later fails to load.
+          # Prefer the newest saved auth artifact from EITHER login or farm runs.
+          for RUN_ID in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100&branch=main" --jq '.workflow_runs[] | select(.path == ".github/workflows/v2-popup-probe.yml" or .path == ".github/workflows/v2-qr-capture.yml") | .id'); do
             if [ "$RUN_ID" = "$GITHUB_RUN_ID" ]; then
               continue
             fi
