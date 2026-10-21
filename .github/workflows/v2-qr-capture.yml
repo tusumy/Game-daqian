@@ -114,13 +114,29 @@ jobs:
           echo "扫码抓包进程总超时"
           exit 1
 
+      - name: Upload refreshed login state privately
+        if: ${{ always() && hashFiles('v2/qr/storage_state.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xddq-auth-state-refresh-${{ github.run_number }}
+          path: v2/qr/storage_state.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: 上传协议抓包结果
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xddq-live-capture-${{ github.run_number }}
+          # Never put the credential-bearing storage_state.json in this evidence bundle.
           path: |
-            v2/qr/
+            v2/qr/qr.png
+            v2/qr/login_page.png
+            v2/qr/status.json
+            v2/qr/session.log
+            v2/qr/network.jsonl
+            v2/qr/state_trace.jsonl
+            v2/qr/frames.jsonl
             v2/capture/
           if-no-files-found: warn
           retention-days: 1
