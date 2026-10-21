@@ -608,6 +608,15 @@ def run():
                     raise RuntimeError("登录成功后回到首页，但未能启动寻道大千")
                 page = launched
 
+            # The login token is already authenticated after the frontend reaches
+            # the game route. Save it BEFORE testing whether the embedded game
+            # canvas loads: network popups can block game readiness for minutes.
+            if not pc_web_auth_ready(page):
+                raise RuntimeError("前端已跳转，但缺少扫码后的登录凭据，拒绝保存空登录态")
+            context.storage_state(path=str(QR_OUT / "storage_state.json"))
+            write_status({"state": "auth_saved", "url": page.url})
+            print("[AUTH_SAVED] 扫码认证完成，已提前保存可恢复的登录状态", flush=True)
+
             game_deadline = time.time() + 120
             while time.time() < game_deadline:
                 snapshot_state(page, "wait_real_game")
