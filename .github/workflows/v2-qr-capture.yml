@@ -1,5 +1,5 @@
 name: V2 支付宝扫码抓包
-# QR session refresh requested 2026-10-21
+# QR refresh 2026-10-21 retry 24 (expired code)
 
 on:
   push:
