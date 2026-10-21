@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: xddq-v2-qr-capture
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   capture:
