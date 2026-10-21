@@ -1,4 +1,5 @@
 name: V2 支付宝扫码抓包
+# QR session refresh requested 2026-10-21
 
 on:
   push:
